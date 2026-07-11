@@ -18,9 +18,9 @@ type Server struct {
 }
 
 // New constructs a Server and registers all routes.
-func New(authHandler *auth.Handler, sessions SessionLookup, users UserLookup) *Server {
+func New(authHandler *auth.Handler, sessions SessionLookup, users UserLookup, slackH *slackHandler, dashH *dashboardHandler) *Server {
 	s := &Server{mux: http.NewServeMux(), sessions: sessions, users: users}
-	s.routes(authHandler)
+	s.routes(authHandler, slackH, dashH)
 	return s
 }
 
@@ -37,12 +37,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (s *Server) routes(auth *auth.Handler) {
+func (s *Server) routes(auth *auth.Handler, slackH *slackHandler, dashH *dashboardHandler) {
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/auth/login", auth.Login)
 	s.mux.HandleFunc("GET /api/auth/callback", auth.Callback)
 	s.mux.HandleFunc("GET /api/auth/logout", auth.Logout)
 	s.mux.HandleFunc("GET /api/v1/me", s.requireSession(s.handleMe))
+	s.mux.HandleFunc("POST /api/slack/events", slackH.handleEvent)
+	s.mux.HandleFunc("GET /api/dashboard", dashH.handleDashboard)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

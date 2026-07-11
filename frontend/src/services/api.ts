@@ -1,4 +1,4 @@
-import type { User } from '@/types'
+import type { User, DashboardEntry } from '@/types'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -22,4 +22,5 @@ async function request<T>(path: string, init?: RequestInit, skipUnauthorized = f
 export const api = {
   getHealth: (): Promise<{ status: string }> => request('/api/v1/health'),
   getMe: (): Promise<User> => request<User>('/api/v1/me', undefined, true),
+  getDashboard: (): Promise<DashboardEntry[]> => request<DashboardEntry[]>('/api/dashboard'),
 }

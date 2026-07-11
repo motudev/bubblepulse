@@ -51,6 +51,7 @@ func main() {
 
 	userRepo := repository.NewUserRepo(pool)
 	sessionRepo := repository.NewSessionRepo(pool)
+	dailyUpdateRepo := repository.NewDailyUpdateRepo(pool)
 
 	authHandler := auth.NewHandler(oidcProvider, auth.Config{
 		IssuerURL:    cfg.OIDCIssuerURL,
@@ -60,9 +61,12 @@ func main() {
 		FrontendURL:  cfg.FrontendURL,
 	}, userRepo, sessionRepo)
 
+	slackH := api.NewSlackHandler(cfg.SlackSigningSecret, pool, dailyUpdateRepo)
+	dashH := api.NewDashboardHandler(dailyUpdateRepo)
+
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      api.New(authHandler, sessionRepo, userRepo),
+		Handler:      api.New(authHandler, sessionRepo, userRepo, slackH, dashH),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,

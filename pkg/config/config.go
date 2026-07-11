@@ -8,26 +8,30 @@ import (
 
 // Config holds all runtime configuration for the application.
 type Config struct {
-	Port             string
-	DatabaseURL      string
-	OIDCIssuerURL    string
-	OIDCClientID     string
-	OIDCClientSecret string
-	OIDCRedirectURL  string
-	FrontendURL      string // origin of the SPA; empty means same origin as the backend
+	Port               string
+	DatabaseURL        string
+	OIDCIssuerURL      string
+	OIDCClientID       string
+	OIDCClientSecret   string
+	OIDCRedirectURL    string
+	FrontendURL        string // origin of the SPA; empty means same origin as the backend
+	SlackSigningSecret string
+	SlackBotToken      string
 }
 
 // Load reads environment variables and returns a validated Config.
 // Returns an error listing all missing required variables.
 func Load() (Config, error) {
 	cfg := Config{
-		Port:             getEnvWithDefault("PORT", "8080"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		OIDCIssuerURL:    getEnvWithDefault("OIDC_ISSUER_URL", "https://slack.com"),
-		OIDCClientID:     os.Getenv("OIDC_CLIENT_ID"),
-		OIDCClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		OIDCRedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
-		FrontendURL:      os.Getenv("FRONTEND_URL"),
+		Port:               getEnvWithDefault("PORT", "8080"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		OIDCIssuerURL:      getEnvWithDefault("OIDC_ISSUER_URL", "https://slack.com"),
+		OIDCClientID:       os.Getenv("OIDC_CLIENT_ID"),
+		OIDCClientSecret:   os.Getenv("OIDC_CLIENT_SECRET"),
+		OIDCRedirectURL:    os.Getenv("OIDC_REDIRECT_URL"),
+		FrontendURL:        os.Getenv("FRONTEND_URL"),
+		SlackSigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
+		SlackBotToken:      os.Getenv("SLACK_BOT_TOKEN"),
 	}
 
 	var missing []string
@@ -42,6 +46,12 @@ func Load() (Config, error) {
 	}
 	if cfg.OIDCRedirectURL == "" {
 		missing = append(missing, "OIDC_REDIRECT_URL")
+	}
+	if cfg.SlackSigningSecret == "" {
+		missing = append(missing, "SLACK_SIGNING_SECRET")
+	}
+	if cfg.SlackBotToken == "" {
+		missing = append(missing, "SLACK_BOT_TOKEN")
 	}
 
 	if len(missing) > 0 {
