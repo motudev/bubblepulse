@@ -1,2 +1,5 @@
-// Domain types are added here as the backend API is built out.
-export {}
+export interface User {
+  id: number
+  email: string
+  name: string
+}

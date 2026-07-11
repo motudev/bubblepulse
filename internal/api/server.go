@@ -10,14 +10,16 @@ import (
 	"github.com/motudev/bubblepulse/internal/auth"
 )
 
-// Server holds the configured HTTP mux.
+// Server holds the configured HTTP mux and its dependencies.
 type Server struct {
-	mux *http.ServeMux
+	mux      *http.ServeMux
+	sessions SessionLookup
+	users    UserLookup
 }
 
 // New constructs a Server and registers all routes.
-func New(authHandler *auth.Handler) *Server {
-	s := &Server{mux: http.NewServeMux()}
+func New(authHandler *auth.Handler, sessions SessionLookup, users UserLookup) *Server {
+	s := &Server{mux: http.NewServeMux(), sessions: sessions, users: users}
 	s.routes(authHandler)
 	return s
 }
@@ -39,6 +41,8 @@ func (s *Server) routes(auth *auth.Handler) {
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/auth/login", auth.Login)
 	s.mux.HandleFunc("GET /api/auth/callback", auth.Callback)
+	s.mux.HandleFunc("GET /api/auth/logout", auth.Logout)
+	s.mux.HandleFunc("GET /api/v1/me", s.requireSession(s.handleMe))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

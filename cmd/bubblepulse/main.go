@@ -49,16 +49,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	userRepo := repository.NewUserRepo(pool)
+	sessionRepo := repository.NewSessionRepo(pool)
+
 	authHandler := auth.NewHandler(oidcProvider, auth.Config{
 		IssuerURL:    cfg.OIDCIssuerURL,
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
 		RedirectURL:  cfg.OIDCRedirectURL,
-	}, repository.NewUserRepo(pool), repository.NewSessionRepo(pool))
+		FrontendURL:  cfg.FrontendURL,
+	}, userRepo, sessionRepo)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      api.New(authHandler),
+		Handler:      api.New(authHandler, sessionRepo, userRepo),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,

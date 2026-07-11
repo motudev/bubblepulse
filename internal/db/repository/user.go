@@ -17,6 +17,13 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 	return &UserRepo{pool: pool}
 }
 
+// UserRecord holds the user fields returned by FindByID.
+type UserRecord struct {
+	ID    int64
+	Email string
+	Name  string
+}
+
 // UpsertUser inserts or updates a user by email and returns their ID.
 func (r *UserRepo) UpsertUser(ctx context.Context, email, name string) (int64, error) {
 	const q = `
@@ -31,6 +38,14 @@ func (r *UserRepo) UpsertUser(ctx context.Context, email, name string) (int64, e
 		return 0, err
 	}
 	return id, nil
+}
+
+// FindByID returns a user by primary key.
+func (r *UserRepo) FindByID(ctx context.Context, id int64) (UserRecord, error) {
+	const q = `SELECT id, email, name FROM users WHERE id = $1`
+	var u UserRecord
+	err := r.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.Email, &u.Name)
+	return u, err
 }
 
 // UpsertIdentity links a provider identity to a user; no-op if the identity already exists.

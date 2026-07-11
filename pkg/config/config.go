@@ -14,6 +14,7 @@ type Config struct {
 	OIDCClientID     string
 	OIDCClientSecret string
 	OIDCRedirectURL  string
+	FrontendURL      string // origin of the SPA; empty means same origin as the backend
 }
 
 // Load reads environment variables and returns a validated Config.
@@ -26,6 +27,7 @@ func Load() (Config, error) {
 		OIDCClientID:     os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		OIDCRedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
+		FrontendURL:      os.Getenv("FRONTEND_URL"),
 	}
 
 	var missing []string

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -21,30 +23,35 @@ type UserRepository interface {
 // SessionRepository persists opaque session tokens.
 type SessionRepository interface {
 	Create(ctx context.Context, userID int64, token string) error
+	Delete(ctx context.Context, token string) error
 }
 
-// Config carries the four OIDC fields needed to configure the Handler.
+// Config carries the OIDC fields needed to configure the Handler.
 type Config struct {
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
+	FrontendURL  string // origin of the SPA (e.g. http://localhost:5173); empty = same origin as backend
 }
 
-// Handler holds the OIDC provider and wires the login/callback HTTP handlers.
+// Handler holds the OIDC provider and wires the login/callback/logout HTTP handlers.
 type Handler struct {
-	provider  *oidc.Provider
-	oauth2Cfg oauth2.Config
-	verifier  *oidc.IDTokenVerifier
-	issuerURL string
-	secure    bool
-	users     UserRepository
-	sessions  SessionRepository
+	provider              *oidc.Provider
+	oauth2Cfg             oauth2.Config
+	verifier              *oidc.IDTokenVerifier
+	issuerURL             string
+	secure                bool
+	frontendURL           string // SPA origin; empty = same origin as backend
+	endSessionEndpoint    string // empty if provider doesn't advertise one
+	postLogoutRedirectURI string // where to land after provider logout
+	users                 UserRepository
+	sessions              SessionRepository
 }
 
 // NewHandler constructs a Handler from a discovered OIDC provider.
 func NewHandler(provider *oidc.Provider, cfg Config, users UserRepository, sessions SessionRepository) *Handler {
-	return &Handler{
+	h := &Handler{
 		provider: provider,
 		oauth2Cfg: oauth2.Config{
 			ClientID:     cfg.ClientID,
@@ -53,37 +60,68 @@ func NewHandler(provider *oidc.Provider, cfg Config, users UserRepository, sessi
 			Endpoint:     provider.Endpoint(),
 			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 		},
-		verifier:  provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
-		issuerURL: cfg.IssuerURL,
-		secure:    strings.HasPrefix(cfg.RedirectURL, "https://"),
-		users:     users,
-		sessions:  sessions,
+		verifier:    provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		issuerURL:   cfg.IssuerURL,
+		secure:      strings.HasPrefix(cfg.RedirectURL, "https://"),
+		frontendURL: cfg.FrontendURL,
+		users:       users,
+		sessions:    sessions,
 	}
+
+	// Extract end_session_endpoint from the OIDC discovery document if present.
+	var meta struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	_ = provider.Claims(&meta)
+	h.endSessionEndpoint = meta.EndSessionEndpoint
+
+	// Post-logout redirect URI: prefer FRONTEND_URL, fall back to backend origin.
+	if cfg.FrontendURL != "" {
+		h.postLogoutRedirectURI = strings.TrimRight(cfg.FrontendURL, "/") + "/"
+	} else if u, err := url.Parse(cfg.RedirectURL); err == nil {
+		h.postLogoutRedirectURI = fmt.Sprintf("%s://%s/", u.Scheme, u.Host)
+	}
+
+	return h
 }
 
-// Login generates a CSRF state token, stores it in an HTTP-only cookie, and
-// redirects the user to the OIDC provider's authorization endpoint.
+// Login generates a CSRF state token and a replay-prevention nonce, stores both in
+// short-lived HTTP-only cookies, and redirects the user to the OIDC authorization endpoint.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	state, err := randomHex(32)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oidc_state",
-		Value:    state,
+	nonce, err := randomHex(32)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	shortLived := &http.Cookie{
 		Path:     "/api/auth/callback",
 		MaxAge:   600,
 		HttpOnly: true,
 		Secure:   h.secure,
 		SameSite: http.SameSiteLaxMode,
-	})
-	http.Redirect(w, r, h.oauth2Cfg.AuthCodeURL(state), http.StatusFound)
+	}
+	stateCookie := *shortLived
+	stateCookie.Name = "oidc_state"
+	stateCookie.Value = state
+	http.SetCookie(w, &stateCookie)
+
+	nonceCookie := *shortLived
+	nonceCookie.Name = "oidc_nonce"
+	nonceCookie.Value = nonce
+	http.SetCookie(w, &nonceCookie)
+
+	authURL := h.oauth2Cfg.AuthCodeURL(state, oauth2.SetAuthURLParam("nonce", nonce))
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// Callback verifies the CSRF state, exchanges the authorization code for tokens,
+// Callback verifies the CSRF state and nonce, exchanges the authorization code for tokens,
 // verifies the id_token, upserts the user and identity, creates a session, and
-// redirects to the frontend root.
+// redirects the browser to the dashboard.
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -92,14 +130,24 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid state", http.StatusBadRequest)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oidc_state",
+	nonceCookie, err := r.Cookie("oidc_nonce")
+	if err != nil {
+		http.Error(w, "missing nonce", http.StatusBadRequest)
+		return
+	}
+	clear := &http.Cookie{
 		Path:     "/api/auth/callback",
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   h.secure,
 		SameSite: http.SameSiteLaxMode,
-	})
+	}
+	clearState := *clear
+	clearState.Name = "oidc_state"
+	http.SetCookie(w, &clearState)
+	clearNonce := *clear
+	clearNonce.Name = "oidc_nonce"
+	http.SetCookie(w, &clearNonce)
 
 	oauth2Token, err := h.oauth2Cfg.Exchange(ctx, r.FormValue("code"))
 	if err != nil {
@@ -125,6 +173,10 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	if err := idToken.Claims(&rawClaims); err != nil {
 		slog.Error("claims extraction failed", "error", err)
 		http.Error(w, "claims extraction failed", http.StatusInternalServerError)
+		return
+	}
+	if nonce, _ := rawClaims["nonce"].(string); nonce != nonceCookie.Value {
+		http.Error(w, "invalid nonce", http.StatusBadRequest)
 		return
 	}
 	claims := normalizeClaims(h.issuerURL, rawClaims)
@@ -165,7 +217,34 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, h.frontendURL+"/dashboard", http.StatusFound)
+}
+
+// Logout deletes the server-side session, clears the session cookie, and redirects
+// to the OIDC provider's end_session_endpoint (RP-initiated logout) when available,
+// otherwise to the app root. Safe to call with a missing or expired cookie.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie("session"); err == nil {
+		// Best-effort delete — ignore errors (token may already be expired/absent).
+		_ = h.sessions.Delete(r.Context(), cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	if h.endSessionEndpoint != "" {
+		params := url.Values{}
+		params.Set("post_logout_redirect_uri", h.postLogoutRedirectURI)
+		http.Redirect(w, r, h.endSessionEndpoint+"?"+params.Encode(), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, h.frontendURL+"/", http.StatusFound)
 }
 
 func randomHex(n int) (string, error) {
