@@ -1,6 +1,6 @@
-# Contributing to Dailybot
+# Contributing to BubblePulse
 
-Thank you for your interest in contributing. Dailybot is an open-source project and contributions of all kinds are welcome.
+Thank you for your interest in contributing. BubblePulse is an open-source project and contributions of all kinds are welcome.
 
 ## Getting Started
 

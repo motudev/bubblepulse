@@ -64,4 +64,4 @@ test-system:
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 build:
-	go build -ldflags="-s -w" -o $(BINARY) ./cmd/dailybot
+	go build -ldflags="-s -w" -o $(BINARY) ./cmd/bubblepulse

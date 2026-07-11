@@ -12,11 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
-	"github.com/motudev/dailybot/internal/api"
-	"github.com/motudev/dailybot/internal/auth"
-	"github.com/motudev/dailybot/internal/db"
-	"github.com/motudev/dailybot/internal/db/repository"
-	"github.com/motudev/dailybot/pkg/config"
+	"github.com/motudev/bubblepulse/internal/api"
+	"github.com/motudev/bubblepulse/internal/auth"
+	"github.com/motudev/bubblepulse/internal/db"
+	"github.com/motudev/bubblepulse/internal/db/repository"
+	"github.com/motudev/bubblepulse/pkg/config"
 	"github.com/pressly/goose/v3"
 )
 

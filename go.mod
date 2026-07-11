@@ -1,4 +1,4 @@
-module github.com/motudev/dailybot
+module github.com/motudev/bubblepulse
 
 go 1.25.0
 

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/motudev/dailybot/internal/auth"
+	"github.com/motudev/bubblepulse/internal/auth"
 )
 
 // Server holds the configured HTTP mux.

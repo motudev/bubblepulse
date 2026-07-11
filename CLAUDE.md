@@ -1,8 +1,8 @@
-# Dailybot — Coding Standards for Claude
+# BubblePulse — Coding Standards for Claude
 
 ## Project Identity
 
-- **Module:** `github.com/motudev/dailybot`
+- **Module:** `github.com/motudev/bubblepulse`
 - **Go version:** 1.22 (use enhanced `ServeMux` method+path routing, `slices` package)
 - **Frontend:** Vue 3 + Vite + TypeScript 5 + Pinia
 

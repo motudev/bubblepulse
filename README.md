@@ -1,4 +1,4 @@
-# Dailybot
+# BubblePulse
 
 An open-source, self-hosted asynchronous check-in platform. Eliminate unnecessary status meetings while keeping teams aligned through a visual dependency graph powered by daily Focus/Friction/Energy updates.
 
@@ -35,7 +35,7 @@ The default `.env.example` values are pre-configured to match the Docker Compose
 ## Project Structure
 
 ```
-cmd/dailybot/     Entry point — composition root
+cmd/bubblepulse/     Entry point — composition root
 internal/api/     HTTP handlers and middleware
 internal/db/      Database connection and migrations
 internal/domain/  Core domain types (added per feature)
