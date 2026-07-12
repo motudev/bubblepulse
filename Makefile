@@ -12,6 +12,7 @@ export PATH := $(GOBIN):$(PATH)
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 install:
+	go get github.com/sugarme/tokenizer@master
 	go get golang.org/x/oauth2 github.com/coreos/go-oidc/v3/oidc github.com/joho/godotenv
 	go mod tidy
 	go mod download
@@ -33,6 +34,7 @@ db-reset:
 # ── Development ───────────────────────────────────────────────────────────────
 
 dev-backend:
+	docker compose up -d nlp_service
 	air -c .air.toml
 
 dev-frontend:

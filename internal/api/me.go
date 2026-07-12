@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/motudev/bubblepulse/internal/db/repository"
@@ -32,6 +33,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.users.FindByID(r.Context(), userID)
 	if err != nil {
+		slog.Error("me: failed to fetch user", "user_id", userID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

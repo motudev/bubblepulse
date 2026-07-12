@@ -17,6 +17,8 @@ type Config struct {
 	FrontendURL        string // origin of the SPA; empty means same origin as the backend
 	SlackSigningSecret string
 	SlackBotToken      string
+	ONNXRuntimePath    string // path to libonnxruntime shared library; defaults to "libonnxruntime.so"
+	NLPServiceURL      string // base URL of the Python NLP sidecar; defaults to http://localhost:8090
 }
 
 // Load reads environment variables and returns a validated Config.
@@ -32,6 +34,8 @@ func Load() (Config, error) {
 		FrontendURL:        os.Getenv("FRONTEND_URL"),
 		SlackSigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
 		SlackBotToken:      os.Getenv("SLACK_BOT_TOKEN"),
+		ONNXRuntimePath:    getEnvWithDefault("ONNX_RUNTIME_PATH", "libonnxruntime.so"),
+		NLPServiceURL:      getEnvWithDefault("NLP_SERVICE_URL", "http://localhost:8090"),
 	}
 
 	var missing []string

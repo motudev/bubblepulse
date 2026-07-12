@@ -1,76 +1,219 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { CSSProperties } from 'vue'
 import { api } from '@/services/api'
-import type { DashboardEntry } from '@/types'
+import { useForceSimulation } from '@/composables/useForceSimulation'
+import type { SimNode } from '@/composables/useForceSimulation'
+import type { DashboardResponse, UserEntry } from '@/types'
 
-const GOLDEN_ANGLE = 2.39996 // ≈ 137.5° golden angle in radians
-const BASE_RADIUS = 18       // % of container dimension per sqrt-unit
+const svgRef = ref<SVGSVGElement | null>(null)
+const svgWidth = ref(800)
+const svgHeight = ref(600)
+const dashboardData = ref<DashboardResponse | null>(null)
+const hoveredId = ref<string | null>(null)
 
-const entries = ref<DashboardEntry[]>([])
-const hoveredId = ref<number | null>(null)
+const { nodes, links, tickCount } = useForceSimulation(dashboardData, svgWidth, svgHeight)
 
-onMounted(async () => {
-  entries.value = await api.getDashboard()
+const nodePositions = computed(() => {
+  void tickCount.value
+  return nodes.value.map((n) => ({
+    ...n,
+    cx: n.x ?? svgWidth.value / 2,
+    cy: n.y ?? svgHeight.value / 2,
+  }))
 })
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.min(Math.max(v, lo), hi)
-}
-
-const nodeStyles = computed((): CSSProperties[] =>
-  entries.value.map((_, i) => {
-    const angle = i * GOLDEN_ANGLE
-    const radius = i === 0 ? 0 : Math.sqrt(i) * BASE_RADIUS
-    const floatDelay = (i * 0.08) + 0.6 + (i % 5) * 0.55
+const linkCoords = computed(() => {
+  void tickCount.value
+  return links.value.map((l, i) => {
+    const s = l.source as SimNode
+    const t = l.target as SimNode
     return {
-      '--node-index': i,
-      '--float-delay': `${floatDelay}s`,
-      left: `${clamp(50 + radius * Math.cos(angle), 8, 92)}%`,
-      top: `${clamp(50 + radius * Math.sin(angle), 8, 92)}%`,
-    } as CSSProperties
+      key: i,
+      type: l.type,
+      x1: typeof s === 'object' ? (s.x ?? 0) : 0,
+      y1: typeof s === 'object' ? (s.y ?? 0) : 0,
+      x2: typeof t === 'object' ? (t.x ?? 0) : 0,
+      y2: typeof t === 'object' ? (t.y ?? 0) : 0,
+    }
   })
-)
+})
 
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map(w => w[0]?.toUpperCase() ?? '')
-    .join('')
+const topicNodes = computed(() => nodePositions.value.filter((n) => n.type === 'topic'))
+const userNodes = computed(() => nodePositions.value.filter((n) => n.type === 'user'))
+const hoveredNode = computed(() => nodePositions.value.find((n) => n.id === hoveredId.value))
+
+function tooltipStyle(node: { cx: number; cy: number }): CSSProperties {
+  return { left: `${node.cx}px`, top: `${node.cy - 68}px` }
 }
+
+function topicPillWidth(label: string): number {
+  return label.length * 7 + 24
+}
+
+function updateEntry(id: string): UserEntry | undefined {
+  const numId = parseInt(id.replace('user:', ''), 10)
+  return dashboardData.value?.users.find((u) => u.id === numId)
+}
+
+// Vary float timing per bubble so they never drift in unison.
+const FLOAT_DURATIONS = [7.4, 9.1, 8.3, 10.6, 7.8, 9.8]
+const FLOAT_DELAYS    = [0, -2.3, -4.7, -1.6, -3.2, -5.4]
+const TOPIC_DURATIONS = [11.2, 9.6, 12.4, 10.0]
+const TOPIC_DELAYS    = [-1.0, -4.2, -6.1, -2.8]
+
+function bubbleStyle(index: number): CSSProperties {
+  return {
+    '--float-dur':  `${FLOAT_DURATIONS[index % FLOAT_DURATIONS.length]}s`,
+    '--float-delay': `${FLOAT_DELAYS[index % FLOAT_DELAYS.length]}s`,
+    '--node-index': index,
+  } as CSSProperties
+}
+
+function topicStyle(index: number): CSSProperties {
+  return {
+    '--float-dur':  `${TOPIC_DURATIONS[index % TOPIC_DURATIONS.length]}s`,
+    '--float-delay': `${TOPIC_DELAYS[index % TOPIC_DELAYS.length]}s`,
+    '--node-index': index,
+  } as CSSProperties
+}
+
+let ro: ResizeObserver | null = null
+
+onMounted(async () => {
+  dashboardData.value = await api.getDashboard()
+
+  ro = new ResizeObserver((entries) => {
+    const r = entries[0]?.contentRect
+    if (r) {
+      svgWidth.value = r.width
+      svgHeight.value = r.height
+    }
+  })
+  if (svgRef.value) ro.observe(svgRef.value)
+})
+
+onUnmounted(() => ro?.disconnect())
 </script>
 
 <template>
   <div class="bubble-map" role="region" aria-label="Team pulse board">
-    <div
-      v-for="(entry, i) in entries"
-      :key="entry.id"
-      class="bubble-map__node"
-      :style="nodeStyles[i]"
-      tabindex="0"
-      :aria-label="`${entry.name}${entry.update_text ? ': ' + entry.update_text : ': no update yet'}`"
-      @mouseenter="hoveredId = entry.id"
-      @mouseleave="hoveredId = null"
-      @focus="hoveredId = entry.id"
-      @blur="hoveredId = null"
-    >
-      <span
-        class="bubble-map__avatar"
-        :class="{ 'bubble-map__avatar--active': entry.update_text !== null }"
-      >{{ initials(entry.name) }}</span>
+    <svg ref="svgRef" class="bubble-map__canvas" aria-hidden="true">
+      <defs>
+        <!-- Glass sheen: top-left highlight that simulates a translucent sphere -->
+        <radialGradient id="bubble-sheen" cx="38%" cy="32%" r="62%" gradientUnits="objectBoundingBox">
+          <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
+        <!-- Soft green centre overlay for users who submitted today -->
+        <radialGradient id="bubble-active" cx="50%" cy="50%" r="55%" gradientUnits="objectBoundingBox">
+          <stop offset="0%"   stop-color="#00b894" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#00b894" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
 
-      <span class="bubble-map__name">{{ entry.name }}</span>
+      <!-- Ambient atmosphere blobs — very faint, pulse slowly -->
+      <g class="bubble-map__atmosphere" aria-hidden="true">
+        <circle
+          class="bubble-map__atm-blob bubble-map__atm-blob--a"
+          :cx="svgWidth * 0.28" :cy="svgHeight * 0.38" r="200"
+        />
+        <circle
+          class="bubble-map__atm-blob bubble-map__atm-blob--b"
+          :cx="svgWidth * 0.72" :cy="svgHeight * 0.62" r="170"
+        />
+      </g>
 
+      <!-- Edge layer -->
+      <g class="bubble-map__edges">
+        <line
+          v-for="link in linkCoords"
+          :key="link.key"
+          :x1="link.x1" :y1="link.y1"
+          :x2="link.x2" :y2="link.y2"
+          class="bubble-map__edge"
+          :class="`bubble-map__edge--${link.type}`"
+        />
+      </g>
+
+      <!-- Topic nodes: floating pill labels -->
+      <g class="bubble-map__topics">
+        <g
+          v-for="(node, i) in topicNodes"
+          :key="node.id"
+          class="bubble-map__topic-node"
+          :transform="`translate(${node.cx},${node.cy})`"
+        >
+          <g class="bubble-map__topic-bubble" :style="topicStyle(i)">
+            <rect
+              :width="topicPillWidth(node.label)"
+              height="28"
+              :x="-topicPillWidth(node.label) / 2"
+              y="-14"
+              rx="14"
+              class="bubble-map__topic-pill"
+            />
+            <text class="bubble-map__topic-label" text-anchor="middle" dominant-baseline="central">
+              {{ node.label }}
+            </text>
+          </g>
+        </g>
+      </g>
+
+      <!-- User nodes: glass bubbles with initials -->
+      <g class="bubble-map__users">
+        <g
+          v-for="(node, i) in userNodes"
+          :key="node.id"
+          class="bubble-map__user-node"
+          :class="{ 'bubble-map__user-node--active': node.hasUpdate }"
+          :transform="`translate(${node.cx},${node.cy})`"
+          tabindex="0"
+          :aria-label="`${node.label}${updateEntry(node.id)?.update_text ? ': ' + updateEntry(node.id)?.update_text : ': no update yet'}`"
+          @mouseenter="hoveredId = node.id"
+          @mouseleave="hoveredId = null"
+          @focus="hoveredId = node.id"
+          @blur="hoveredId = null"
+        >
+          <g class="bubble-map__user-bubble" :style="bubbleStyle(i)">
+            <!-- Base glass circle -->
+            <circle r="44" class="bubble-map__avatar-circle" />
+            <!-- Active tint overlay (only for users with today's update) -->
+            <circle
+              v-if="node.hasUpdate"
+              r="44"
+              fill="url(#bubble-active)"
+              class="bubble-map__avatar-active-fill"
+            />
+            <!-- Glass sheen highlight -->
+            <circle r="44" fill="url(#bubble-sheen)" class="bubble-map__avatar-sheen" />
+            <text
+              class="bubble-map__avatar-initials"
+              text-anchor="middle"
+              dominant-baseline="central"
+            >{{ node.initials }}</text>
+            <text class="bubble-map__node-name" text-anchor="middle" y="58">
+              {{ node.label }}
+            </text>
+          </g>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Tooltip overlaid on canvas via absolute positioning -->
+    <Transition name="tooltip">
       <div
+        v-if="hoveredNode"
         class="bubble-map__tooltip"
-        :class="{ 'bubble-map__tooltip--visible': hoveredId === entry.id }"
+        :style="tooltipStyle(hoveredNode)"
         aria-hidden="true"
       >
-        <span class="bubble-map__tooltip-name">{{ entry.name }}</span>
-        <span class="bubble-map__tooltip-text">{{ entry.update_text ?? 'No update yet' }}</span>
+        <span class="bubble-map__tooltip-name">{{ hoveredNode.label }}</span>
+        <span class="bubble-map__tooltip-text">
+          {{ updateEntry(hoveredNode.id)?.update_text ?? 'No update yet' }}
+        </span>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -83,87 +226,150 @@ function initials(name: string): string {
   background: var(--color-canvas-bg);
 }
 
-/* ── Node wrapper ──────────────────────────────────────────────────── */
-.bubble-map__node {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-  opacity: 0;
-  outline: none; /* handled per child below */
-  animation-name: nodeEntrance, bubbleFloat;
-  animation-duration: 0.5s, 6.5s;
-  animation-timing-function: ease, ease-in-out;
-  animation-delay: calc(var(--node-index, 0) * 80ms), var(--float-delay, 0.6s);
-  animation-fill-mode: forwards, none;
-  animation-iteration-count: 1, infinite;
+/* ── SVG canvas ─────────────────────────────────────────────────────── */
+.bubble-map__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-/* ── Avatar circle ─────────────────────────────────────────────────── */
-.bubble-map__avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 80px;
-  height: 80px;
-  border-radius: var(--radius-full);
-  background: linear-gradient(135deg, rgba(26, 26, 46, 0.38), rgba(13, 17, 23, 0.22));
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-node), 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+/* ── Atmosphere ────��────────────────────────��───────────────────────── */
+.bubble-map__atm-blob {
+  fill: var(--color-brand);
+  animation: atmospherePulse 14s ease-in-out infinite;
+}
+.bubble-map__atm-blob--b {
+  animation-delay: -7s;
+  animation-duration: 17s;
+  fill: var(--color-node-active-from);
+}
+
+/* ── Edges ────────────���─────────────────────────────────────────────── */
+.bubble-map__edge {
+  stroke: var(--color-edge-normal);
+  stroke-width: 1;
+  opacity: 0.35;
+  fill: none;
+}
+
+.bubble-map__edge--topic-similarity {
+  stroke: var(--color-brand-light);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  opacity: 0.45;
+  fill: none;
+  animation: dashFlow 1.8s linear infinite;
+}
+
+/* ── Topic nodes ───────────────────────────────────────���────────────── */
+.bubble-map__topic-node {
+  cursor: default;
+}
+
+.bubble-map__topic-bubble {
+  animation:
+    nodeEntranceSvg 0.5s ease calc(var(--node-index, 0) * 60ms) both,
+    bubbleFloatSvg  var(--float-dur, 10s) var(--float-delay, 0s) ease-in-out infinite;
+  transform-origin: center;
+}
+
+.bubble-map__topic-pill {
+  fill: rgba(108, 99, 255, 0.12);
+  stroke: rgba(108, 99, 255, 0.45);
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 8px rgba(108, 99, 255, 0.2));
+}
+
+.bubble-map__topic-label {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  fill: var(--color-brand-light);
+  pointer-events: none;
+}
+
+/* ── User bubble wrapper — carries float + entrance ─────────────────── */
+.bubble-map__user-bubble {
+  animation:
+    nodeEntranceSvg 0.6s ease calc(var(--node-index, 0) * 80ms) both,
+    bubbleFloatSvg  var(--float-dur, 8s) var(--float-delay, 0s) ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* Pause float on hover so the lift on the circle feels deliberate */
+.bubble-map__user-node:hover .bubble-map__user-bubble,
+.bubble-map__user-node:focus-visible .bubble-map__user-bubble {
+  animation-play-state: running, paused;
+}
+
+/* ── User nodes ─────���───────────────────────────────────────────────── */
+.bubble-map__user-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.bubble-map__user-node:focus-visible .bubble-map__avatar-circle {
+  stroke: var(--color-brand);
+  stroke-width: 2.5;
+}
+
+/* ── Avatar circle: main glass body ─────────────────────────────────── */
+.bubble-map__avatar-circle {
+  fill: rgba(16, 18, 38, 0.52);
+  stroke: rgba(255, 255, 255, 0.20);
+  stroke-width: 1.5;
+  filter:
+    drop-shadow(0 6px 20px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 0 rgba(108, 99, 255, 0));
+  transition: transform var(--transition-base), filter var(--transition-base);
+}
+
+.bubble-map__user-node--active .bubble-map__avatar-circle {
+  stroke: rgba(0, 184, 148, 0.45);
+  filter:
+    drop-shadow(0 6px 20px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 18px rgba(0, 184, 148, 0.3));
+}
+
+.bubble-map__user-node:hover .bubble-map__avatar-circle,
+.bubble-map__user-node:focus-visible .bubble-map__avatar-circle {
+  transform: translateY(-5px);
+  filter:
+    drop-shadow(0 12px 32px rgba(0, 0, 0, 0.7))
+    drop-shadow(0 0 16px rgba(108, 99, 255, 0.35));
+}
+
+.bubble-map__user-node:active .bubble-map__avatar-circle {
+  transform: translateY(0);
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.5));
+}
+
+/* ��─ Sheen and active-fill overlays ───────────────────────────────���─── */
+.bubble-map__avatar-sheen,
+.bubble-map__avatar-active-fill {
+  pointer-events: none;
+}
+
+/* ── Avatar text ────────────────────────────────────────────────────── */
+.bubble-map__avatar-initials {
   font-family: var(--font-sans);
   font-size: var(--font-size-lg);
   font-weight: 700;
-  color: var(--color-text-muted);
-  transition:
-    box-shadow var(--transition-base),
-    transform var(--transition-base);
-  pointer-events: none; /* events handled by wrapper */
+  fill: var(--color-text-primary);
+  pointer-events: none;
 }
 
-.bubble-map__avatar--active {
-  background: linear-gradient(135deg, rgba(0, 184, 148, 0.38), rgba(0, 206, 201, 0.28));
-  color: var(--color-text-primary);
-}
-
-.bubble-map__node:hover .bubble-map__avatar,
-.bubble-map__node:focus-visible .bubble-map__avatar {
-  box-shadow: var(--shadow-node-hover);
-  transform: translateY(-4px);
-}
-
-.bubble-map__node:active .bubble-map__avatar {
-  box-shadow: var(--shadow-node);
-  transform: translateY(0);
-}
-
-.bubble-map__node:focus-visible .bubble-map__avatar {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
-}
-
-/* ── Name label ────────────────────────────────────────────────────── */
-.bubble-map__name {
+.bubble-map__node-name {
   font-family: var(--font-sans);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
+  fill: var(--color-text-secondary);
   pointer-events: none;
 }
 
-/* ── Tooltip ───────────────────────────────────────────────────────── */
+/* ── Tooltip ──────────────��─────────────────────────────────────────── */
 .bubble-map__tooltip {
   position: absolute;
-  bottom: calc(100% + var(--space-2));
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  opacity: 0;
+  transform: translateX(-50%) translateY(-100%);
   pointer-events: none;
-  transition:
-    opacity var(--transition-fast),
-    transform var(--transition-fast);
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -179,11 +385,6 @@ function initials(name: string): string {
   z-index: 10;
 }
 
-.bubble-map__tooltip--visible {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
 .bubble-map__tooltip-name {
   font-family: var(--font-sans);
   font-size: var(--font-size-sm);
@@ -195,5 +396,17 @@ function initials(name: string): string {
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+}
+
+/* ── Tooltip Vue transition ───────────��─────────────────────────────── */
+.tooltip-enter-active,
+.tooltip-leave-active {
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.tooltip-enter-from,
+.tooltip-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(calc(-100% + 6px));
 }
 </style>

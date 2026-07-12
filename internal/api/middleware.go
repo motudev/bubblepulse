@@ -2,7 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
+
+	"github.com/motudev/bubblepulse/internal/db/repository"
 )
 
 // ctxKey is an unexported type that prevents context key collisions across packages.
@@ -21,6 +25,9 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 		}
 		userID, err := s.sessions.FindUserIDByToken(r.Context(), cookie.Value)
 		if err != nil {
+			if !errors.Is(err, repository.ErrSessionNotFound) {
+				slog.Error("session: DB error during lookup", "error", err)
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

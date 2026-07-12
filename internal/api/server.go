@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/motudev/bubblepulse/internal/auth"
+	"github.com/motudev/bubblepulse/internal/messaging"
 )
 
 // Server holds the configured HTTP mux and its dependencies.
@@ -18,9 +19,9 @@ type Server struct {
 }
 
 // New constructs a Server and registers all routes.
-func New(authHandler *auth.Handler, sessions SessionLookup, users UserLookup, slackH *slackHandler, dashH *dashboardHandler) *Server {
+func New(authHandler *auth.Handler, sessions SessionLookup, users UserLookup, platforms []messaging.PlatformAdapter, dashH *dashboardHandler) *Server {
 	s := &Server{mux: http.NewServeMux(), sessions: sessions, users: users}
-	s.routes(authHandler, slackH, dashH)
+	s.routes(authHandler, platforms, dashH)
 	return s
 }
 
@@ -37,14 +38,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (s *Server) routes(auth *auth.Handler, slackH *slackHandler, dashH *dashboardHandler) {
+func (s *Server) routes(auth *auth.Handler, platforms []messaging.PlatformAdapter, dashH *dashboardHandler) {
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/auth/login", auth.Login)
 	s.mux.HandleFunc("GET /api/auth/callback", auth.Callback)
 	s.mux.HandleFunc("GET /api/auth/logout", auth.Logout)
 	s.mux.HandleFunc("GET /api/v1/me", s.requireSession(s.handleMe))
-	s.mux.HandleFunc("POST /api/slack/events", slackH.handleEvent)
 	s.mux.HandleFunc("GET /api/dashboard", dashH.handleDashboard)
+	for _, p := range platforms {
+		s.mux.HandleFunc(p.Route(), p.Handler())
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
