@@ -133,3 +133,10 @@ body {
     stroke-dashoffset: -36;
   }
 }
+
+@keyframes bubbleFloat {
+  0%   { transform: translate(-50%, -50%) translate(0px,   0px); }
+  33%  { transform: translate(-50%, -50%) translate(5px,  -12px); }
+  66%  { transform: translate(-50%, -50%) translate(-4px,  -8px); }
+  100% { transform: translate(-50%, -50%) translate(0px,   0px); }
+}

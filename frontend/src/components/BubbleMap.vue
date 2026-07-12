@@ -22,8 +22,10 @@ const nodeStyles = computed((): CSSProperties[] =>
   entries.value.map((_, i) => {
     const angle = i * GOLDEN_ANGLE
     const radius = i === 0 ? 0 : Math.sqrt(i) * BASE_RADIUS
+    const floatDelay = (i * 0.08) + 0.6 + (i % 5) * 0.55
     return {
       '--node-index': i,
+      '--float-delay': `${floatDelay}s`,
       left: `${clamp(50 + radius * Math.cos(angle), 8, 92)}%`,
       top: `${clamp(50 + radius * Math.sin(angle), 8, 92)}%`,
     } as CSSProperties
@@ -89,10 +91,14 @@ function initials(name: string): string {
   align-items: center;
   gap: var(--space-2);
   cursor: pointer;
-  animation: nodeEntrance 0.5s ease forwards;
-  animation-delay: calc(var(--node-index, 0) * 80ms);
   opacity: 0;
   outline: none; /* handled per child below */
+  animation-name: nodeEntrance, bubbleFloat;
+  animation-duration: 0.5s, 6.5s;
+  animation-timing-function: ease, ease-in-out;
+  animation-delay: calc(var(--node-index, 0) * 80ms), var(--float-delay, 0.6s);
+  animation-fill-mode: forwards, none;
+  animation-iteration-count: 1, infinite;
 }
 
 /* ── Avatar circle ─────────────────────────────────────────────────── */
@@ -103,8 +109,10 @@ function initials(name: string): string {
   width: 80px;
   height: 80px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, var(--color-surface-dark), var(--color-canvas-bg));
-  box-shadow: var(--shadow-node);
+  background: linear-gradient(135deg, rgba(26, 26, 46, 0.38), rgba(13, 17, 23, 0.22));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-node), 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   font-family: var(--font-sans);
   font-size: var(--font-size-lg);
   font-weight: 700;
@@ -116,7 +124,7 @@ function initials(name: string): string {
 }
 
 .bubble-map__avatar--active {
-  background: linear-gradient(135deg, var(--color-node-active-from), var(--color-node-active-to));
+  background: linear-gradient(135deg, rgba(0, 184, 148, 0.38), rgba(0, 206, 201, 0.28));
   color: var(--color-text-primary);
 }
 
