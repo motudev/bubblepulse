@@ -276,7 +276,6 @@ export function buildDataForTeam(teamId: string | null): DashboardResponse {
   const topics = DEMO_TOPICS.filter((t) => usedTopics.has(t))
 
   // Extract the sub-matrix for the active topics.
-  const idxMap = new Map(topics.map((t, i) => [t, i]))
   const similarity_matrix: number[][] = topics.map((row) =>
     topics.map((col) => {
       const ri = DEMO_TOPICS.indexOf(row)

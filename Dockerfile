@@ -3,7 +3,7 @@
 # Local:  docker build -f dailybot/Dockerfile -t bubblepulse-backend:local .
 # CI:     context: .  file: dailybot/Dockerfile  (GHA checks both repos out as siblings)
 
-ARG ONNX_VERSION=1.21.0
+ARG ONNX_VERSION=1.23.0
 ARG GO_VERSION=1.25
 
 # ─── Stage 1: Download ONNX Runtime (cached independently of source changes) ──
