@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import DashboardPreview from '@/views/DashboardPreview.vue'
+import { DEMO_ENABLED } from '@/demo'
+import { useUserStore } from '@/stores/user'
 
-function handleSlackLogin(): void {
+const router = useRouter()
+const userStore = useUserStore()
+
+async function handleSlackLogin(): Promise<void> {
+  if (DEMO_ENABLED) {
+    userStore.setDemoUser()
+    await router.push('/dashboard')
+    return
+  }
   window.location.href = '/api/auth/login'
 }
 </script>

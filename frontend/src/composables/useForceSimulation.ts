@@ -84,10 +84,18 @@ function buildLinks(data: DashboardResponse, nodes: SimNode[]): SimLink[] {
   return [...userTopicLinks, ...simLinks]
 }
 
+function topologyKey(d: DashboardResponse, w: number, h: number, r: number): string {
+  const users = d.users
+    .map((u) => `${u.id}:${[...u.topics].sort().join(',')}`)
+    .join('|')
+  return `${users}##${d.topics.join('|')}##${w}|${h}|${r}`
+}
+
 export function useForceSimulation(
   data: Ref<DashboardResponse | null>,
   width: Ref<number>,
   height: Ref<number>,
+  userRadius: Ref<number> = ref(44),
 ) {
   const nodes = ref<SimNode[]>([])
   const links = ref<SimLink[]>([])
@@ -102,6 +110,16 @@ export function useForceSimulation(
 
     const allNodes = buildNodes(data.value)
     const allLinks = buildLinks(data.value, allNodes)
+
+    // Pre-seed positions at SVG centre so the CSS entrance animation plays from there.
+    // Without this, d3 places nodes via a phyllotaxis spiral around (0,0) — the top-left corner.
+    const cx = width.value / 2
+    const cy = height.value / 2
+    allNodes.forEach((n) => {
+      n.x = cx + (Math.random() - 0.5) * 10
+      n.y = cy + (Math.random() - 0.5) * 10
+    })
+
     nodes.value = allNodes
     links.value = allLinks
 
@@ -115,7 +133,7 @@ export function useForceSimulation(
     )
 
     const collideForce = forceCollide<SimNode>()
-      .radius((d) => (d.type === 'topic' ? 54 : 44))
+      .radius((d) => (d.type === 'topic' ? 54 : userRadius.value + 10))
       .strength(0.7)
 
     sim = forceSimulation<SimNode>(allNodes)
@@ -131,7 +149,33 @@ export function useForceSimulation(
     sim.restart()
   }
 
-  watch([data, width, height], restart, { immediate: true })
+  let lastKey = ''
+
+  watch(
+    [data, width, height, userRadius],
+    ([newData, newW, newH, newR]) => {
+      if (!newData) return
+      const key = topologyKey(newData, newW as number, newH as number, newR as number)
+
+      if (key === lastKey && nodes.value.length > 0) {
+        // Topology unchanged — only hasUpdate may differ; patch nodes in-place.
+        const updateMap = new Map(
+          newData.users.map((u) => [`user:${u.id}`, u.update_text !== null])
+        )
+        nodes.value.forEach((n) => {
+          if (n.type === 'user') {
+            const next = updateMap.get(n.id)
+            if (next !== undefined) n.hasUpdate = next
+          }
+        })
+        return
+      }
+
+      lastKey = key
+      restart()
+    },
+    { immediate: true },
+  )
 
   onUnmounted(() => sim?.stop())
 

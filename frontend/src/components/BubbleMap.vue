@@ -7,6 +7,8 @@ import { useForceSimulation } from '@/composables/useForceSimulation'
 import type { SimNode } from '@/composables/useForceSimulation'
 import type { DashboardResponse, UserEntry } from '@/types'
 import StarField from '@/components/StarField.vue'
+import { DEMO_ENABLED } from '@/demo'
+import { useDemoDashboard } from '@/demo/useDemoDashboard'
 
 const svgRef = ref<SVGSVGElement | null>(null)
 const svgWidth = ref(800)
@@ -14,7 +16,20 @@ const svgHeight = ref(600)
 const dashboardData = ref<DashboardResponse | null>(null)
 const hoveredId = ref<string | null>(null)
 
-const { nodes, links, tickCount } = useForceSimulation(dashboardData, svgWidth, svgHeight)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const lastPanPos = ref({ x: 0, y: 0 })
+const zoomScale = ref(1)
+
+const userBubbleRadius = computed(() => {
+  const count = dashboardData.value?.users.length ?? 0
+  if (count <= 6) return 44
+  return Math.max(22, Math.round(44 * Math.sqrt(6 / count)))
+})
+const bubbleFontSize = computed(() => Math.max(10, Math.round(userBubbleRadius.value * 0.4)))
+
+const { nodes, links, tickCount } = useForceSimulation(dashboardData, svgWidth, svgHeight, userBubbleRadius)
 
 const nodePositions = computed(() => {
   void tickCount.value
@@ -45,8 +60,15 @@ const topicNodes = computed(() => nodePositions.value.filter((n) => n.type === '
 const userNodes = computed(() => nodePositions.value.filter((n) => n.type === 'user'))
 const hoveredNode = computed(() => nodePositions.value.find((n) => n.id === hoveredId.value))
 
+const viewTransform = computed(
+  () => `translate(${panX.value},${panY.value}) scale(${zoomScale.value})`
+)
+
 function tooltipStyle(node: { cx: number; cy: number }): CSSProperties {
-  return { left: `${node.cx}px`, top: `${node.cy - 68}px` }
+  const screenX = node.cx * zoomScale.value + panX.value
+  const screenY = node.cy * zoomScale.value + panY.value
+  const offset = (userBubbleRadius.value + 24) * zoomScale.value
+  return { left: `${screenX}px`, top: `${screenY - offset}px` }
 }
 
 function topicPillWidth(label: string): number {
@@ -80,20 +102,55 @@ function topicStyle(index: number): CSSProperties {
   } as CSSProperties
 }
 
+function handleMouseDown(e: MouseEvent): void {
+  if (e.button !== 1) return
+  e.preventDefault()
+  isPanning.value = true
+  lastPanPos.value = { x: e.clientX, y: e.clientY }
+}
+
+function handleMouseMove(e: MouseEvent): void {
+  if (!isPanning.value) return
+  panX.value += e.clientX - lastPanPos.value.x
+  panY.value += e.clientY - lastPanPos.value.y
+  lastPanPos.value = { x: e.clientX, y: e.clientY }
+}
+
+function handleMouseUp(e: MouseEvent): void {
+  if (e.button !== 1) return
+  isPanning.value = false
+}
+
+function handleWheel(e: WheelEvent): void {
+  e.preventDefault()
+  const factor = Math.exp(-e.deltaY * 0.001)
+  const newScale = Math.min(4, Math.max(0.2, zoomScale.value * factor))
+  const rect = svgRef.value!.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  panX.value += (mx - panX.value) * (1 - newScale / zoomScale.value)
+  panY.value += (my - panY.value) * (1 - newScale / zoomScale.value)
+  zoomScale.value = newScale
+}
+
 const scopeStore = useScopeStore()
 
-// Refetch whenever the org/team scope toggle changes.
-watch(
-  () => scopeStore.activeTeamId,
-  async (teamId) => {
-    dashboardData.value = await api.getDashboard(teamId)
-  }
-)
+if (DEMO_ENABLED) {
+  const demoSource = useDemoDashboard(computed(() => scopeStore.activeTeamId))
+  watch(demoSource, (v) => { dashboardData.value = v }, { immediate: true })
+} else {
+  watch(
+    () => scopeStore.activeTeamId,
+    async (teamId) => { dashboardData.value = await api.getDashboard(teamId) },
+  )
+}
 
 let ro: ResizeObserver | null = null
 
 onMounted(async () => {
-  dashboardData.value = await api.getDashboard(scopeStore.activeTeamId)
+  if (!DEMO_ENABLED) {
+    dashboardData.value = await api.getDashboard(scopeStore.activeTeamId)
+  }
 
   ro = new ResizeObserver((entries) => {
     const r = entries[0]?.contentRect
@@ -103,15 +160,29 @@ onMounted(async () => {
     }
   })
   if (svgRef.value) ro.observe(svgRef.value)
+
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+  svgRef.value?.addEventListener('wheel', handleWheel, { passive: false })
 })
 
-onUnmounted(() => ro?.disconnect())
+onUnmounted(() => {
+  ro?.disconnect()
+  document.removeEventListener('mousemove', handleMouseMove)
+  document.removeEventListener('mouseup', handleMouseUp)
+})
 </script>
 
 <template>
   <div class="bubble-map" role="region" aria-label="Team pulse board">
     <StarField class="bubble-map__stars" />
-    <svg ref="svgRef" class="bubble-map__canvas" aria-hidden="true">
+    <svg
+      ref="svgRef"
+      class="bubble-map__canvas"
+      :class="{ 'bubble-map__canvas--panning': isPanning }"
+      aria-hidden="true"
+      @mousedown="handleMouseDown"
+    >
       <defs>
         <!-- Glass sheen: top-left highlight that simulates a translucent sphere -->
         <radialGradient id="bubble-sheen" cx="38%" cy="32%" r="62%" gradientUnits="objectBoundingBox">
@@ -124,6 +195,8 @@ onUnmounted(() => ro?.disconnect())
           <stop offset="100%" stop-color="#00b894" stop-opacity="0"/>
         </radialGradient>
       </defs>
+
+      <g :transform="viewTransform">
 
       <!-- Edge layer -->
       <g class="bubble-map__edges">
@@ -178,27 +251,32 @@ onUnmounted(() => ro?.disconnect())
         >
           <g class="bubble-map__user-bubble" :style="bubbleStyle(i)">
             <!-- Base glass circle -->
-            <circle r="44" class="bubble-map__avatar-circle" />
-            <!-- Active tint overlay (only for users with today's update) -->
-            <circle
-              v-if="node.hasUpdate"
-              r="44"
-              fill="url(#bubble-active)"
-              class="bubble-map__avatar-active-fill"
-            />
+            <circle :r="userBubbleRadius" class="bubble-map__avatar-circle" />
+            <!-- Active tint overlay fades in when the user submits their update -->
+            <Transition name="bubble-active-fill">
+              <circle
+                v-if="node.hasUpdate"
+                :r="userBubbleRadius"
+                fill="url(#bubble-active)"
+                class="bubble-map__avatar-active-fill"
+              />
+            </Transition>
             <!-- Glass sheen highlight -->
-            <circle r="44" fill="url(#bubble-sheen)" class="bubble-map__avatar-sheen" />
+            <circle :r="userBubbleRadius" fill="url(#bubble-sheen)" class="bubble-map__avatar-sheen" />
             <text
               class="bubble-map__avatar-initials"
               text-anchor="middle"
               dominant-baseline="central"
+              :style="{ fontSize: bubbleFontSize + 'px' }"
             >{{ node.initials }}</text>
-            <text class="bubble-map__node-name" text-anchor="middle" y="58">
+            <text class="bubble-map__node-name" text-anchor="middle" :y="userBubbleRadius + 14">
               {{ node.label }}
             </text>
           </g>
         </g>
       </g>
+
+      </g><!-- end viewTransform -->
     </svg>
 
     <!-- Tooltip overlaid on canvas via absolute positioning -->
@@ -232,6 +310,10 @@ onUnmounted(() => ro?.disconnect())
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.bubble-map__canvas--panning {
+  cursor: grabbing;
 }
 
 /* ── Star field canvas ──────────────────────────────────────────────── */
@@ -268,6 +350,7 @@ onUnmounted(() => ro?.disconnect())
     nodeEntranceSvg 0.5s ease calc(var(--node-index, 0) * 60ms) both,
     bubbleFloatSvg  var(--float-dur, 10s) var(--float-delay, 0s) ease-in-out infinite;
   transform-origin: center;
+  transform-box: fill-box;
 }
 
 .bubble-map__topic-pill {
@@ -290,6 +373,7 @@ onUnmounted(() => ro?.disconnect())
     nodeEntranceSvg 0.6s ease calc(var(--node-index, 0) * 80ms) both,
     bubbleFloatSvg  var(--float-dur, 8s) var(--float-delay, 0s) ease-in-out infinite;
   transform-origin: center;
+  transform-box: fill-box;
 }
 
 /* Pause float on hover so the lift on the circle feels deliberate */
@@ -312,12 +396,15 @@ onUnmounted(() => ro?.disconnect())
 /* ── Avatar circle: main glass body ─────────────────────────────────── */
 .bubble-map__avatar-circle {
   fill: rgba(16, 18, 38, 0.52);
-  /* stroke: rgba(255, 255, 255, 0.20); */
-  /* stroke-width: 1.5; */
+  stroke: rgba(0, 184, 148, 0);
+  stroke-width: 1.5;
   filter:
     drop-shadow(0 6px 20px rgba(0, 0, 0, 0.55))
     drop-shadow(0 0 0 rgba(108, 99, 255, 0));
-  transition: transform var(--transition-base), filter var(--transition-base);
+  transition:
+    transform var(--transition-base),
+    filter    var(--transition-slow),
+    stroke    var(--transition-slow);
 }
 
 .bubble-map__user-node--active .bubble-map__avatar-circle {
@@ -395,7 +482,15 @@ onUnmounted(() => ro?.disconnect())
   color: var(--color-text-secondary);
 }
 
-/* ── Tooltip Vue transition ───────────��─────────────────────────────── */
+/* ── Active-fill overlay entrance ───────────────────────────────────── */
+.bubble-active-fill-enter-active {
+  transition: opacity var(--transition-slow);
+}
+.bubble-active-fill-enter-from {
+  opacity: 0;
+}
+
+/* ── Tooltip Vue transition ───────────────────────────────────────── */
 .tooltip-enter-active,
 .tooltip-leave-active {
   transition: opacity var(--transition-fast), transform var(--transition-fast);
