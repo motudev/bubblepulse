@@ -25,6 +25,7 @@ import (
 	"github.com/motudev/bubblepulse/internal/db/repository"
 	"github.com/motudev/bubblepulse/internal/messaging"
 	slackplatform "github.com/motudev/bubblepulse/internal/platform/slack"
+	"github.com/motudev/bubblepulse/internal/tenancy"
 	"github.com/motudev/bubblepulse/internal/worker"
 	"github.com/motudev/bubblepulse/pkg/config"
 )
@@ -60,6 +61,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Tenant transaction runner: binds every transaction to the caller's
+	// organization (pooled) or to the RLS bypass (siloed).
+	siloed := cfg.TenancyMode == config.TenancySiloed
+	runner := tenancy.NewRunner(pool, siloed)
+	if !siloed {
+		// A superuser or BYPASSRLS role would silently skip every RLS policy,
+		// exposing all tenants to each other — refuse to start.
+		if err := tenancy.VerifyPooledSafety(context.Background(), pool); err != nil {
+			slog.Error("pooled tenancy safety check failed", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	// Run River's own schema migrations (idempotent; tracks applied versions in river_migration).
 	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
 	if err != nil {
@@ -81,8 +95,9 @@ func main() {
 
 	// Register River workers.
 	nlpClient := worker.NewNLPServiceClient(cfg.NLPServiceURL)
+	dailyUpdateRepo := repository.NewDailyUpdateRepo(pool)
 	workers := river.NewWorkers()
-	river.AddWorker(workers, worker.NewNLPWorker(pool, &normalizedModel{embedder}, nlpClient))
+	river.AddWorker(workers, worker.NewNLPWorker(runner, dailyUpdateRepo, &normalizedModel{embedder}, nlpClient))
 
 	riverClient, err := river.NewClient[pgx.Tx](riverpgxv5.New(pool), &river.Config{
 		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 4}},
@@ -101,7 +116,9 @@ func main() {
 
 	userRepo := repository.NewUserRepo(pool)
 	sessionRepo := repository.NewSessionRepo(pool)
-	dailyUpdateRepo := repository.NewDailyUpdateRepo(pool)
+	orgRepo := repository.NewOrgRepo(pool)
+	workspaceRepo := repository.NewWorkspaceRepo(pool)
+	teamRepo := repository.NewTeamRepo(pool)
 
 	authHandler := auth.NewHandler(oidcProvider, auth.Config{
 		IssuerURL:    cfg.OIDCIssuerURL,
@@ -109,21 +126,33 @@ func main() {
 		ClientSecret: cfg.OIDCClientSecret,
 		RedirectURL:  cfg.OIDCRedirectURL,
 		FrontendURL:  cfg.FrontendURL,
-	}, userRepo, sessionRepo)
+	}, pool, runner, auth.Repos{
+		Users:      userRepo,
+		Sessions:   sessionRepo,
+		Orgs:       orgRepo,
+		Workspaces: workspaceRepo,
+	})
 
-	// Platform-agnostic message service wires the DB and queue logic.
-	msgSvc := messaging.NewMessageService(pool, dailyUpdateRepo, riverClient)
+	// Platform-agnostic message service wires the Global Directory resolution,
+	// tenant-scoped DB writes, and queue logic.
+	msgSvc := messaging.NewMessageService(runner, userRepo, workspaceRepo, dailyUpdateRepo, riverClient)
 
 	// Register platform adapters — add new platforms here without touching anything else.
 	platforms := []messaging.PlatformAdapter{
 		slackplatform.NewAdapter(cfg.SlackSigningSecret, msgSvc),
 	}
 
-	dashH := api.NewDashboardHandler(dailyUpdateRepo)
+	dashH := api.NewDashboardHandler(runner, dailyUpdateRepo)
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      api.New(authHandler, sessionRepo, userRepo, platforms, dashH),
+		Addr: ":" + cfg.Port,
+		Handler: api.New(authHandler, api.Deps{
+			Runner:   runner,
+			Sessions: sessionRepo,
+			Users:    userRepo,
+			Teams:    teamRepo,
+			Orgs:     orgRepo,
+		}, platforms, dashH),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,

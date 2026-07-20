@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { CSSProperties } from 'vue'
 import { api } from '@/services/api'
+import { useScopeStore } from '@/stores/scope'
 import { useForceSimulation } from '@/composables/useForceSimulation'
 import type { SimNode } from '@/composables/useForceSimulation'
 import type { DashboardResponse, UserEntry } from '@/types'
+import StarField from '@/components/StarField.vue'
 
 const svgRef = ref<SVGSVGElement | null>(null)
 const svgWidth = ref(800)
@@ -78,10 +80,20 @@ function topicStyle(index: number): CSSProperties {
   } as CSSProperties
 }
 
+const scopeStore = useScopeStore()
+
+// Refetch whenever the org/team scope toggle changes.
+watch(
+  () => scopeStore.activeTeamId,
+  async (teamId) => {
+    dashboardData.value = await api.getDashboard(teamId)
+  }
+)
+
 let ro: ResizeObserver | null = null
 
 onMounted(async () => {
-  dashboardData.value = await api.getDashboard()
+  dashboardData.value = await api.getDashboard(scopeStore.activeTeamId)
 
   ro = new ResizeObserver((entries) => {
     const r = entries[0]?.contentRect
@@ -98,6 +110,7 @@ onUnmounted(() => ro?.disconnect())
 
 <template>
   <div class="bubble-map" role="region" aria-label="Team pulse board">
+    <StarField class="bubble-map__stars" />
     <svg ref="svgRef" class="bubble-map__canvas" aria-hidden="true">
       <defs>
         <!-- Glass sheen: top-left highlight that simulates a translucent sphere -->
@@ -111,18 +124,6 @@ onUnmounted(() => ro?.disconnect())
           <stop offset="100%" stop-color="#00b894" stop-opacity="0"/>
         </radialGradient>
       </defs>
-
-      <!-- Ambient atmosphere blobs — very faint, pulse slowly -->
-      <g class="bubble-map__atmosphere" aria-hidden="true">
-        <circle
-          class="bubble-map__atm-blob bubble-map__atm-blob--a"
-          :cx="svgWidth * 0.28" :cy="svgHeight * 0.38" r="200"
-        />
-        <circle
-          class="bubble-map__atm-blob bubble-map__atm-blob--b"
-          :cx="svgWidth * 0.72" :cy="svgHeight * 0.62" r="170"
-        />
-      </g>
 
       <!-- Edge layer -->
       <g class="bubble-map__edges">
@@ -233,18 +234,14 @@ onUnmounted(() => ro?.disconnect())
   height: 100%;
 }
 
-/* ── Atmosphere ────��────────────────────────��───────────────────────── */
-.bubble-map__atm-blob {
-  fill: var(--color-brand);
-  animation: atmospherePulse 14s ease-in-out infinite;
-}
-.bubble-map__atm-blob--b {
-  animation-delay: -7s;
-  animation-duration: 17s;
-  fill: var(--color-node-active-from);
+/* ── Star field canvas ──────────────────────────────────────────────── */
+.bubble-map__stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
-/* ── Edges ────────────���─────────────────────────────────────────────── */
+/* ── Edges ────────────────────────────────────────────────────────── */
 .bubble-map__edge {
   stroke: var(--color-edge-normal);
   stroke-width: 1;
@@ -315,8 +312,8 @@ onUnmounted(() => ro?.disconnect())
 /* ── Avatar circle: main glass body ─────────────────────────────────── */
 .bubble-map__avatar-circle {
   fill: rgba(16, 18, 38, 0.52);
-  stroke: rgba(255, 255, 255, 0.20);
-  stroke-width: 1.5;
+  /* stroke: rgba(255, 255, 255, 0.20); */
+  /* stroke-width: 1.5; */
   filter:
     drop-shadow(0 6px 20px rgba(0, 0, 0, 0.55))
     drop-shadow(0 0 0 rgba(108, 99, 255, 0));

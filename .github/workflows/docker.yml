@@ -1,0 +1,112 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: motudev
+
+jobs:
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # Check out this repo into a subdirectory so the sibling repo can sit next to it.
+      # The local replace directive in go.mod resolves to ../all-minilm-l6-v2-go,
+      # which maps to the sibling checkout during the Docker build.
+      - name: Checkout bubblepulse
+        uses: actions/checkout@v4
+        with:
+          path: dailybot
+
+      - name: Checkout all-minilm-l6-v2-go
+        uses: actions/checkout@v4
+        with:
+          repository: clems4ever/all-minilm-l6-v2-go
+          path: all-minilm-l6-v2-go
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Backend ────────────────────────────────────────────────────────────
+      - name: Backend — extract metadata
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/bubblepulse-backend
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Backend — build and push
+        uses: docker/build-push-action@v6
+        with:
+          # Parent directory is the context so both dailybot/ and all-minilm-l6-v2-go/ are included.
+          context: .
+          file: dailybot/Dockerfile
+          push: true
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      # ── Frontend ───────────────────────────────────────────────────────────
+      - name: Frontend — extract metadata
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/bubblepulse-frontend
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Frontend — build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: dailybot/frontend
+          file: dailybot/frontend/Dockerfile
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # ── NLP sidecar ────────────────────────────────────────────────────────
+      - name: NLP — extract metadata
+        id: nlp-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/bubblepulse-nlp
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: NLP — build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: dailybot/nlp_service
+          push: true
+          tags: ${{ steps.nlp-meta.outputs.tags }}
+          labels: ${{ steps.nlp-meta.outputs.labels }}
+          cache-from: type=gha,scope=nlp
+          cache-to: type=gha,scope=nlp,mode=max

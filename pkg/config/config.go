@@ -6,9 +6,19 @@ import (
 	"os"
 )
 
+// Tenancy deployment modes selectable via TENANCY_MODE.
+const (
+	// TenancyPooled runs the app as shared multi-tenant SaaS with RLS enforcement.
+	TenancyPooled = "pooled"
+	// TenancySiloed runs the app as a dedicated single-tenant deployment,
+	// activating the RLS bypass condition baked into every policy.
+	TenancySiloed = "siloed"
+)
+
 // Config holds all runtime configuration for the application.
 type Config struct {
 	Port               string
+	TenancyMode        string // TenancyPooled (default) or TenancySiloed
 	DatabaseURL        string
 	OIDCIssuerURL      string
 	OIDCClientID       string
@@ -26,6 +36,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:               getEnvWithDefault("PORT", "8080"),
+		TenancyMode:        getEnvWithDefault("TENANCY_MODE", TenancyPooled),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		OIDCIssuerURL:      getEnvWithDefault("OIDC_ISSUER_URL", "https://slack.com"),
 		OIDCClientID:       os.Getenv("OIDC_CLIENT_ID"),
@@ -58,8 +69,16 @@ func Load() (Config, error) {
 		missing = append(missing, "SLACK_BOT_TOKEN")
 	}
 
+	var problems []string
 	if len(missing) > 0 {
-		return Config{}, errors.New("missing required environment variables: " + join(missing))
+		problems = append(problems, "missing required environment variables: "+join(missing))
+	}
+	if cfg.TenancyMode != TenancyPooled && cfg.TenancyMode != TenancySiloed {
+		problems = append(problems, "TENANCY_MODE must be '"+TenancyPooled+"' or '"+TenancySiloed+"', got '"+cfg.TenancyMode+"'")
+	}
+
+	if len(problems) > 0 {
+		return Config{}, errors.New(join(problems))
 	}
 
 	return cfg, nil

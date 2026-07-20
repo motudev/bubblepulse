@@ -14,6 +14,13 @@ type UserClaims struct {
 	Email   string
 	Name    string
 	Picture string
+	// WorkspaceID is the provider's tenant identifier (Slack team_id; a future
+	// Teams/Google/SAML tenant handshake maps its tenant ID here). Empty when
+	// the provider exposes no workspace concept.
+	WorkspaceID string
+	// WorkspaceName is the human-readable workspace name, when the provider
+	// supplies one. Used to pre-fill the organization name at auto-provisioning.
+	WorkspaceName string
 }
 
 // NewProvider discovers OIDC endpoints from the issuer's well-known configuration URL.
@@ -31,6 +38,8 @@ func normalizeClaims(issuerURL string, raw map[string]interface{}) UserClaims {
 	switch {
 	case strings.Contains(issuerURL, "slack.com"):
 		claims.Picture = strClaim(raw, "image_192")
+		claims.WorkspaceID = strClaim(raw, "https://slack.com/team_id")
+		claims.WorkspaceName = strClaim(raw, "https://slack.com/team_name")
 	default:
 		claims.Picture = strClaim(raw, "picture")
 	}

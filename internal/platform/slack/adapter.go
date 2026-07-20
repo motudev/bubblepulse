@@ -50,6 +50,7 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Type      string          `json:"type"`
 		Challenge string          `json:"challenge"`
+		TeamID    string          `json:"team_id"`
 		Event     json.RawMessage `json:"event"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -63,13 +64,13 @@ func (a *Adapter) handleEvent(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(payload.Challenge))
 	case "event_callback":
-		a.dispatchEvent(w, r.Context(), payload.Event)
+		a.dispatchEvent(w, r.Context(), payload.TeamID, payload.Event)
 	default:
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func (a *Adapter) dispatchEvent(w http.ResponseWriter, ctx context.Context, raw json.RawMessage) {
+func (a *Adapter) dispatchEvent(w http.ResponseWriter, ctx context.Context, teamID string, raw json.RawMessage) {
 	// Acknowledge immediately; Slack retries non-2xx responses.
 	w.WriteHeader(http.StatusOK)
 
@@ -100,11 +101,12 @@ func (a *Adapter) dispatchEvent(w http.ResponseWriter, ctx context.Context, raw 
 	err := a.svc.Handle(ctx, messaging.IncomingMessage{
 		Provider:       "https://slack.com",
 		PlatformUserID: ev.User,
+		WorkspaceID:    teamID,
 		Text:           ev.Text,
 	})
 	if err != nil {
-		if errors.Is(err, messaging.ErrUserNotFound) {
-			slog.Warn("slack event: user not registered", "slack_user", ev.User)
+		if errors.Is(err, messaging.ErrUserNotFound) || errors.Is(err, messaging.ErrOrgUnresolved) {
+			slog.Warn("slack event: user not registered or unmapped", "slack_user", ev.User, "team_id", teamID, "error", err)
 		} else {
 			slog.Error("slack event: failed to handle message", "slack_user", ev.User, "error", err)
 		}

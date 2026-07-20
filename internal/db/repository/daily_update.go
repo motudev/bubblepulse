@@ -11,6 +11,7 @@ import (
 )
 
 // DailyUpdateRepo handles persistence for daily_updates and daily_update_topics.
+// Both tables are RLS-protected: every method requires a tenant-scoped Querier.
 type DailyUpdateRepo struct {
 	pool *pgxpool.Pool
 }
@@ -20,16 +21,8 @@ func NewDailyUpdateRepo(pool *pgxpool.Pool) *DailyUpdateRepo {
 	return &DailyUpdateRepo{pool: pool}
 }
 
-// DashboardRow holds user profile and their most recent update for the dashboard.
-type DashboardRow struct {
-	UserID     int64
-	Name       string
-	Email      string
-	UpdateText *string
-	UpdateAt   *time.Time
-}
-
-// DashboardRowWithTopics extends DashboardRow with the extracted topics for that update.
+// DashboardRowWithTopics holds a user's profile, their most recent update,
+// and the update's extracted topics for the dashboard.
 type DashboardRowWithTopics struct {
 	UserID     int64
 	Name       string
@@ -52,81 +45,50 @@ type TopicSimilarityRow struct {
 	Similarity float64
 }
 
-// Insert adds a new update row for the given user.
-func (r *DailyUpdateRepo) Insert(ctx context.Context, userID int64, text string) error {
-	const q = `INSERT INTO daily_updates (user_id, update_text) VALUES ($1, $2)`
-	_, err := r.pool.Exec(ctx, q, userID, text)
-	return err
-}
-
-// InsertTx adds a new update row within a caller-managed transaction and returns the generated ID.
-func (r *DailyUpdateRepo) InsertTx(ctx context.Context, tx pgx.Tx, userID int64, text string) (int64, error) {
-	const q = `INSERT INTO daily_updates (user_id, update_text) VALUES ($1, $2) RETURNING id`
+// InsertTx adds a new update row within a caller-managed tenant transaction
+// and returns the generated ID.
+func (r *DailyUpdateRepo) InsertTx(ctx context.Context, tx pgx.Tx, orgID string, userID int64, text string) (int64, error) {
+	const q = `INSERT INTO daily_updates (org_id, user_id, update_text) VALUES ($1, $2, $3) RETURNING id`
 	var id int64
-	err := tx.QueryRow(ctx, q, userID, text).Scan(&id)
+	err := tx.QueryRow(ctx, q, orgID, userID, text).Scan(&id)
 	return id, err
 }
 
 // FindUpdateTextByID returns the update_text for the given daily_update ID.
-func (r *DailyUpdateRepo) FindUpdateTextByID(ctx context.Context, id int64) (string, error) {
-	const q = `SELECT update_text FROM daily_updates WHERE id = $1`
+func (r *DailyUpdateRepo) FindUpdateTextByID(ctx context.Context, q Querier, id int64) (string, error) {
+	const query = `SELECT update_text FROM daily_updates WHERE id = $1`
 	var text string
-	err := r.pool.QueryRow(ctx, q, id).Scan(&text)
+	err := q.QueryRow(ctx, query, id).Scan(&text)
 	return text, err
 }
 
 // SetUpdateEmbedding stores the 384-dim embedding vector for a daily update row.
-func (r *DailyUpdateRepo) SetUpdateEmbedding(ctx context.Context, id int64, embedding []float32) error {
-	const q = `UPDATE daily_updates SET update_embedding = $1::vector WHERE id = $2`
-	_, err := r.pool.Exec(ctx, q, floatSliceToVectorLiteral(embedding), id)
+func (r *DailyUpdateRepo) SetUpdateEmbedding(ctx context.Context, q Querier, id int64, embedding []float32) error {
+	const query = `UPDATE daily_updates SET update_embedding = $1::vector WHERE id = $2`
+	_, err := q.Exec(ctx, query, floatSliceToVectorLiteral(embedding), id)
 	return err
 }
 
 // InsertTopics batch-inserts extracted topic rows for a given daily update.
-func (r *DailyUpdateRepo) InsertTopics(ctx context.Context, dailyUpdateID int64, topics []TopicInsert) error {
+// Each row carries org_id explicitly to satisfy the RLS WITH CHECK clause.
+func (r *DailyUpdateRepo) InsertTopics(ctx context.Context, q Querier, orgID string, dailyUpdateID int64, topics []TopicInsert) error {
 	if len(topics) == 0 {
 		return nil
 	}
-	const q = `INSERT INTO daily_update_topics (daily_update_id, extracted_topic, topic_embedding) VALUES ($1, $2, $3::vector)`
+	const query = `INSERT INTO daily_update_topics (org_id, daily_update_id, extracted_topic, topic_embedding) VALUES ($1, $2, $3, $4::vector)`
 	batch := &pgx.Batch{}
 	for _, t := range topics {
-		batch.Queue(q, dailyUpdateID, t.ExtractedTopic, floatSliceToVectorLiteral(t.Embedding))
+		batch.Queue(query, orgID, dailyUpdateID, t.ExtractedTopic, floatSliceToVectorLiteral(t.Embedding))
 	}
-	return r.pool.SendBatch(ctx, batch).Close()
+	return q.SendBatch(ctx, batch).Close()
 }
 
-// FindLatestPerUser returns the single most recent active update for every user.
-// Users with no updates are still included with nil fields.
-func (r *DailyUpdateRepo) FindLatestPerUser(ctx context.Context) ([]DashboardRow, error) {
-	const q = `
-		SELECT DISTINCT ON (u.id)
-			u.id, u.name, u.email,
-			du.update_text, du.created_at
-		FROM users u
-		LEFT JOIN daily_updates du ON du.user_id = u.id AND du.deleted_at IS NULL
-		ORDER BY u.id, du.created_at DESC NULLS LAST`
-
-	rows, err := r.pool.Query(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []DashboardRow
-	for rows.Next() {
-		var row DashboardRow
-		if err := rows.Scan(&row.UserID, &row.Name, &row.Email, &row.UpdateText, &row.UpdateAt); err != nil {
-			return nil, err
-		}
-		results = append(results, row)
-	}
-	return results, rows.Err()
-}
-
-// FindLatestPerUserWithTopics returns today's most recent active update per user,
-// with each update's extracted topics aggregated into a slice.
-func (r *DailyUpdateRepo) FindLatestPerUserWithTopics(ctx context.Context) ([]DashboardRowWithTopics, error) {
-	const q = `
+// FindLatestPerUserWithTopics returns today's most recent active update per
+// visible user, with each update's extracted topics aggregated into a slice.
+// A non-nil teamID restricts the result to members of that team; the RLS
+// policy supplies the organization scoping.
+func (r *DailyUpdateRepo) FindLatestPerUserWithTopics(ctx context.Context, q Querier, teamID *string) ([]DashboardRowWithTopics, error) {
+	const query = `
 		SELECT
 			u.id, u.name, u.email,
 			latest.update_text, latest.created_at,
@@ -145,10 +107,11 @@ func (r *DailyUpdateRepo) FindLatestPerUserWithTopics(ctx context.Context) ([]Da
 			LIMIT 1
 		) latest ON TRUE
 		LEFT JOIN daily_update_topics t ON t.daily_update_id = latest.id
+		WHERE ($1::uuid IS NULL OR u.team_id = $1::uuid)
 		GROUP BY u.id, u.name, u.email, latest.update_text, latest.created_at
 		ORDER BY u.id`
 
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := q.Query(ctx, query, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -173,17 +136,20 @@ func (r *DailyUpdateRepo) FindLatestPerUserWithTopics(ctx context.Context) ([]Da
 }
 
 // FindTodayTopicSimilarities returns upper-triangle pairwise cosine similarities
-// between all distinct topic embeddings from today's updates.
-func (r *DailyUpdateRepo) FindTodayTopicSimilarities(ctx context.Context) ([]TopicSimilarityRow, error) {
-	const q = `
+// between all distinct topic embeddings from today's updates. A non-nil teamID
+// restricts the topics to updates authored by members of that team.
+func (r *DailyUpdateRepo) FindTodayTopicSimilarities(ctx context.Context, q Querier, teamID *string) ([]TopicSimilarityRow, error) {
+	const query = `
 		WITH todays AS (
 			SELECT DISTINCT ON (t.extracted_topic)
 				t.id, t.extracted_topic, t.topic_embedding
 			FROM daily_update_topics t
 			JOIN daily_updates du ON du.id = t.daily_update_id
+			JOIN users u ON u.id = du.user_id
 			WHERE du.created_at::date = NOW()::date
 			  AND du.deleted_at IS NULL
 			  AND t.topic_embedding IS NOT NULL
+			  AND ($1::uuid IS NULL OR u.team_id = $1::uuid)
 			ORDER BY t.extracted_topic, t.id
 		)
 		SELECT
@@ -194,7 +160,7 @@ func (r *DailyUpdateRepo) FindTodayTopicSimilarities(ctx context.Context) ([]Top
 		JOIN todays b ON a.extracted_topic < b.extracted_topic
 		ORDER BY a.extracted_topic, b.extracted_topic`
 
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := q.Query(ctx, query, teamID)
 	if err != nil {
 		return nil, err
 	}

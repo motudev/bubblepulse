@@ -8,22 +8,27 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/motudev/bubblepulse/internal/db/repository"
+	"github.com/motudev/bubblepulse/internal/tenancy"
 )
 
 // dashboardQuerier is the read side of the daily update repository.
+// Both methods touch RLS tables and take a tenant-scoped Querier.
 type dashboardQuerier interface {
-	FindLatestPerUserWithTopics(ctx context.Context) ([]repository.DashboardRowWithTopics, error)
-	FindTodayTopicSimilarities(ctx context.Context) ([]repository.TopicSimilarityRow, error)
+	FindLatestPerUserWithTopics(ctx context.Context, q repository.Querier, teamID *string) ([]repository.DashboardRowWithTopics, error)
+	FindTodayTopicSimilarities(ctx context.Context, q repository.Querier, teamID *string) ([]repository.TopicSimilarityRow, error)
 }
 
 type dashboardHandler struct {
-	repo dashboardQuerier
+	runner tenantTxRunner
+	repo   dashboardQuerier
 }
 
 // NewDashboardHandler constructs a dashboardHandler.
-func NewDashboardHandler(repo dashboardQuerier) *dashboardHandler {
-	return &dashboardHandler{repo: repo}
+func NewDashboardHandler(runner tenantTxRunner, repo dashboardQuerier) *dashboardHandler {
+	return &dashboardHandler{runner: runner, repo: repo}
 }
 
 // userEntry is the per-user JSON shape in the dashboard response.
@@ -43,18 +48,31 @@ type dashboardResponse struct {
 	SimilarityMatrix [][]float64 `json:"similarity_matrix"`
 }
 
-// handleDashboard handles GET /api/dashboard.
+// handleDashboard handles GET /api/dashboard. An optional ?team_id= query
+// parameter restricts the result to one team; the RLS policies scope
+// everything to the caller's organization.
 func (h *dashboardHandler) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.repo.FindLatestPerUserWithTopics(r.Context())
-	if err != nil {
-		slog.Error("dashboard query failed", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	var teamID *string
+	if v := r.URL.Query().Get("team_id"); v != "" {
+		if !tenancy.IsValidUUID(v) {
+			http.Error(w, "invalid team_id", http.StatusBadRequest)
+			return
+		}
+		teamID = &v
 	}
 
-	sims, err := h.repo.FindTodayTopicSimilarities(r.Context())
+	var rows []repository.DashboardRowWithTopics
+	var sims []repository.TopicSimilarityRow
+	err := h.runner.RunTx(r.Context(), func(tx pgx.Tx) error {
+		var txErr error
+		if rows, txErr = h.repo.FindLatestPerUserWithTopics(r.Context(), tx, teamID); txErr != nil {
+			return txErr
+		}
+		sims, txErr = h.repo.FindTodayTopicSimilarities(r.Context(), tx, teamID)
+		return txErr
+	})
 	if err != nil {
-		slog.Error("dashboard similarity query failed", "error", err)
+		slog.Error("dashboard query failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

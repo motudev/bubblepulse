@@ -1,4 +1,4 @@
-import type { User, DashboardResponse } from '@/types'
+import type { User, DashboardResponse, Team, OrgUser, OrgInfo, Role } from '@/types'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -16,11 +16,37 @@ async function request<T>(path: string, init?: RequestInit, skipUnauthorized = f
     }
     throw new Error(`API error ${res.status}: ${await res.text()}`)
   }
+  if (res.status === 204) {
+    return undefined as T
+  }
   return res.json() as Promise<T>
+}
+
+export interface UpdateUserPayload {
+  team_id?: string | null
+  role?: Role
 }
 
 export const api = {
   getHealth: (): Promise<{ status: string }> => request('/api/v1/health'),
   getMe: (): Promise<User> => request<User>('/api/v1/me', undefined, true),
-  getDashboard: (): Promise<DashboardResponse> => request<DashboardResponse>('/api/dashboard'),
+  getDashboard: (teamId?: string | null): Promise<DashboardResponse> =>
+    request<DashboardResponse>(
+      teamId ? `/api/dashboard?team_id=${encodeURIComponent(teamId)}` : '/api/dashboard'
+    ),
+
+  getTeams: (): Promise<Team[]> => request<Team[]>('/api/v1/teams'),
+  createTeam: (name: string): Promise<Team> =>
+    request<Team>('/api/v1/teams', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateTeam: (id: string, name: string): Promise<Team> =>
+    request<Team>(`/api/v1/teams/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteTeam: (id: string): Promise<void> =>
+    request<void>(`/api/v1/teams/${id}`, { method: 'DELETE' }),
+
+  getOrgUsers: (): Promise<OrgUser[]> => request<OrgUser[]>('/api/v1/users'),
+  updateUser: (id: number, payload: UpdateUserPayload): Promise<OrgUser> =>
+    request<OrgUser>(`/api/v1/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  renameOrg: (name: string): Promise<OrgInfo> =>
+    request<OrgInfo>('/api/v1/org', { method: 'PATCH', body: JSON.stringify({ name }) }),
 }

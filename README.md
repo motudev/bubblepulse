@@ -28,7 +28,7 @@ make dev-backend
 make dev-frontend
 ```
 
-The backend runs on `http://localhost:8080` and the frontend on `http://localhost:5173`.
+The backend runs on `http://localhost:8080` and the frontend on `http://localhost:5200`.
 
 The default `.env.example` values are pre-configured to match the Docker Compose database — no edits required for local development.
 
@@ -60,6 +60,17 @@ test/system/      End-to-end system tests
 | `make migrate-status` | Show migration status |
 | `make test` | Run full test suite with coverage |
 | `make build` | Build production binary |
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | System overview, package map, startup order, ingestion pipeline, configuration reference |
+| [docs/multi-tenancy.md](docs/multi-tenancy.md) | Tenancy model, RLS policies, `tenancy.Runner`, role matrix, invariants |
+| [docs/api.md](docs/api.md) | Route table, request/response shapes, error contracts |
+| [docs/data-model.md](docs/data-model.md) | Schema per table, constraints, indexes, migration conventions |
+| [docs/testing.md](docs/testing.md) | Test tiers, how to run them, tenant-isolation test suite |
+| [AUTHENTICATION.md](AUTHENTICATION.md) | OIDC / Slack sign-in flow |
 
 ## Contributing
 

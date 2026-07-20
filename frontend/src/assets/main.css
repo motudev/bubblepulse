@@ -151,8 +151,3 @@ body {
   from { opacity: 0; transform: scale(0.4); }
   to   { opacity: 1; transform: scale(1); }
 }
-
-@keyframes atmospherePulse {
-  0%,100% { transform: scale(1);    opacity: 0.04; }
-  50%     { transform: scale(1.18); opacity: 0.07; }
-}
