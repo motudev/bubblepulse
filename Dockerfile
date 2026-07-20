@@ -44,7 +44,7 @@ RUN cd dailybot && go build -ldflags="-s -w" -o /app/bubblepulse ./cmd/bubblepul
 # ─── Stage 3: Minimal runtime image ───────────────────────────────────────────
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # ONNX Runtime shared library
