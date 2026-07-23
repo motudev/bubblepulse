@@ -27,8 +27,13 @@ export interface UpdateUserPayload {
   role?: Role
 }
 
+export interface AppConfig {
+  slack_oidc: boolean
+}
+
 export const api = {
   getHealth: (): Promise<{ status: string }> => request('/api/v1/health'),
+  getConfig: (): Promise<AppConfig> => request<AppConfig>('/api/v1/config', undefined, true),
   getMe: (): Promise<User> => request<User>('/api/v1/me', undefined, true),
   getDashboard: (teamId?: string | null): Promise<DashboardResponse> =>
     request<DashboardResponse>(

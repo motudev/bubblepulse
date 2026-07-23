@@ -70,6 +70,7 @@ test/system/      End-to-end system tests
 | [docs/api.md](docs/api.md) | Route table, request/response shapes, error contracts |
 | [docs/data-model.md](docs/data-model.md) | Schema per table, constraints, indexes, migration conventions |
 | [docs/testing.md](docs/testing.md) | Test tiers, how to run them, tenant-isolation test suite |
+| [docs/slack-setup.md](docs/slack-setup.md) | How to configure the Slack app (OIDC login + bot DM ingestion), full env var reference, troubleshooting |
 | [AUTHENTICATION.md](AUTHENTICATION.md) | OIDC / Slack sign-in flow |
 
 ## Contributing

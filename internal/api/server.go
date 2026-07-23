@@ -59,6 +59,7 @@ type Server struct {
 	teams               TeamStore
 	orgs                OrgStore
 	slackInstallEnabled bool
+	slackOIDC           bool
 }
 
 // Deps bundles the dependencies of the API server.
@@ -69,6 +70,7 @@ type Deps struct {
 	Teams               TeamStore
 	Orgs                OrgStore
 	SlackInstallEnabled bool // true when SLACK_CLIENT_ID + SLACK_CLIENT_SECRET are configured
+	SlackOIDC           bool // true when OIDC_ISSUER_URL is the Slack issuer
 }
 
 // New constructs a Server and registers all routes.
@@ -81,6 +83,7 @@ func New(authHandler *auth.Handler, deps Deps, platforms []messaging.PlatformAda
 		teams:               deps.Teams,
 		orgs:                deps.Orgs,
 		slackInstallEnabled: deps.SlackInstallEnabled,
+		slackOIDC:           deps.SlackOIDC,
 	}
 	s.routes(authHandler, platforms, dashH)
 	return s
@@ -104,6 +107,7 @@ func (s *Server) routes(auth *auth.Handler, platforms []messaging.PlatformAdapte
 	adminOnly := s.requireRole(repository.RoleAdmin)
 
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/v1/config", s.handleConfig)
 	s.mux.HandleFunc("GET /api/auth/login", auth.Login)
 	s.mux.HandleFunc("GET /api/auth/callback", auth.Callback)
 	s.mux.HandleFunc("GET /api/auth/logout", auth.Logout)

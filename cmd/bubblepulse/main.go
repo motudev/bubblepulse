@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -138,8 +139,9 @@ func main() {
 	msgSvc := messaging.NewMessageService(runner, userRepo, workspaceRepo, dailyUpdateRepo, riverClient)
 
 	// Register platform adapters — add new platforms here without touching anything else.
-	platforms := []messaging.PlatformAdapter{
-		slackplatform.NewAdapter(cfg.SlackSigningSecret, msgSvc),
+	platforms := []messaging.PlatformAdapter{}
+	if cfg.SlackSigningSecret != "" {
+		platforms = append(platforms, slackplatform.NewAdapter(cfg.SlackSigningSecret, msgSvc))
 	}
 
 	// Register the Slack OAuth install flow when client credentials are configured.
@@ -168,6 +170,7 @@ func main() {
 			Teams:               teamRepo,
 			Orgs:                orgRepo,
 			SlackInstallEnabled: cfg.SlackClientID != "" && cfg.SlackClientSecret != "",
+			SlackOIDC:           strings.HasPrefix(cfg.OIDCIssuerURL, "https://slack.com"),
 		}, platforms, dashH),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,

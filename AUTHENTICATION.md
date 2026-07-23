@@ -104,6 +104,8 @@ If your organization uses multiple directories (e.g., Active Directory + Google 
 1. Configure Dex/Zitadel to federate with your complex upstream directories.
 2. Set BubblePulse's `OIDC_ISSUER_URL` to point to your Dex/Zitadel instance.
 
+> For a step-by-step guide on configuring all of this in the Slack API console, including Event Subscriptions and the bot install flow, see [docs/slack-setup.md](docs/slack-setup.md).
+
 ## Required Environment Variables (OIDC login)
 
 ```bash

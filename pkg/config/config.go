@@ -69,10 +69,6 @@ func Load() (Config, error) {
 	if cfg.OIDCRedirectURL == "" {
 		missing = append(missing, "OIDC_REDIRECT_URL")
 	}
-	if cfg.SlackSigningSecret == "" {
-		missing = append(missing, "SLACK_SIGNING_SECRET")
-	}
-
 	var problems []string
 	if len(missing) > 0 {
 		problems = append(problems, "missing required environment variables: "+join(missing))
@@ -85,6 +81,9 @@ func Load() (Config, error) {
 		return Config{}, errors.New(join(problems))
 	}
 
+	if cfg.SlackSigningSecret == "" {
+		slog.Warn("SLACK_SIGNING_SECRET not set: Slack Events API webhook disabled; DM ingestion will not work")
+	}
 	if cfg.TenancyMode == TenancyPooled && (cfg.SlackClientID == "" || cfg.SlackClientSecret == "") {
 		slog.Warn("SLACK_CLIENT_ID or SLACK_CLIENT_SECRET not set: Slack OAuth install flow disabled; new workspaces cannot install the bot")
 	}

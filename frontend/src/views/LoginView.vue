@@ -3,9 +3,11 @@ import { useRouter } from 'vue-router'
 import DashboardPreview from '@/views/DashboardPreview.vue'
 import { DEMO_ENABLED } from '@/demo'
 import { useUserStore } from '@/stores/user'
+import { useConfigStore } from '@/stores/config'
 
 const router = useRouter()
 const userStore = useUserStore()
+const configStore = useConfigStore()
 
 async function handleSlackLogin(): Promise<void> {
   if (DEMO_ENABLED) {
@@ -49,7 +51,13 @@ async function handleSlackLogin(): Promise<void> {
       </div>
 
       <div class="login__cta">
-        <button class="login__slack-btn" type="button" @click="handleSlackLogin">
+        <!-- Slack OIDC: branded button shown only when OIDC_ISSUER_URL is Slack -->
+        <button
+          v-if="configStore.slackOidc"
+          class="login__slack-btn"
+          type="button"
+          @click="handleSlackLogin"
+        >
           <!-- Official Slack 4-colour logo -->
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -69,6 +77,16 @@ async function handleSlackLogin(): Promise<void> {
             <path d="M77.6 90.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6z" fill="#36C5F0"/>
           </svg>
           Sign in with Slack
+        </button>
+
+        <!-- Generic OIDC: provider-agnostic button -->
+        <button
+          v-else
+          class="login__sso-btn"
+          type="button"
+          @click="handleSlackLogin"
+        >
+          Sign in
         </button>
       </div>
 
@@ -196,6 +214,41 @@ async function handleSlackLogin(): Promise<void> {
 }
 
 .login__slack-btn:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+.login__sso-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-brand);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-8);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-btn);
+  transition:
+    box-shadow var(--transition-base),
+    transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.login__sso-btn:hover {
+  box-shadow: var(--shadow-btn-hover);
+  transform: translateY(-2px);
+}
+
+.login__sso-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-btn);
+}
+
+.login__sso-btn:focus-visible {
   outline: 2px solid var(--color-brand);
   outline-offset: 3px;
 }

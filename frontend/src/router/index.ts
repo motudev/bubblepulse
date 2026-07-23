@@ -10,6 +10,7 @@ declare module 'vue-router' {
   }
 }
 import { useUserStore } from '@/stores/user'
+import { useConfigStore } from '@/stores/config'
 import LoginView from '@/views/LoginView.vue'
 import DashboardView from '@/views/DashboardView.vue'
 import AdminSettings from '@/views/AdminSettings.vue'
@@ -31,7 +32,8 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   const userStore = useUserStore()
-  await userStore.ensureSession()
+  const configStore = useConfigStore()
+  await Promise.all([userStore.ensureSession(), configStore.fetchConfig()])
 
   const requiresAuth  = to.matched.some((r) => r.meta.requiresAuth)
   const requiresGuest = to.matched.some((r) => r.meta.requiresGuest)

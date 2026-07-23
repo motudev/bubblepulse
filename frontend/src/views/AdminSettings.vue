@@ -103,6 +103,26 @@ onMounted(loadAll)
       </form>
     </section>
 
+    <section v-if="isAdmin && userStore.user?.slack_install_enabled" class="admin__panel">
+      <h2 class="admin__heading">Slack Integration</h2>
+      <p class="admin__hint">
+        Install the BubblePulse bot in your Slack workspace so your team can send daily updates via DM.
+      </p>
+      <a href="/api/slack/install" class="admin__slack-cta">
+        <img
+          alt="Add to Slack"
+          height="40"
+          width="139"
+          src="https://platform.slack-edge.com/img/add_to_slack.png"
+          srcset="
+            https://platform.slack-edge.com/img/add_to_slack.png    1x,
+            https://platform.slack-edge.com/img/add_to_slack@2x.png 2x
+          "
+        />
+      </a>
+      <p class="admin__slack-note">You can run this again at any time to refresh the connection.</p>
+    </section>
+
     <section class="admin__panel">
       <TeamList
         :teams="teams"
@@ -216,5 +236,22 @@ onMounted(loadAll)
   color: var(--color-text-muted);
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
+}
+
+.admin__slack-cta {
+  display: inline-block;
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+.admin__slack-cta img { display: block; max-width: 100%; }
+.admin__slack-cta:hover { opacity: 0.85; transform: translateY(-1px); }
+.admin__slack-cta:active { opacity: 1; transform: translateY(0); }
+.admin__slack-cta:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 4px; }
+
+.admin__slack-note {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-3);
 }
 </style>

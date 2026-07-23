@@ -13,6 +13,7 @@ Auth levels:
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/v1/health` | public | Liveness probe |
+| GET | `/api/v1/config` | public | App capability flags for the frontend (e.g. which OIDC provider is active) |
 | GET | `/api/auth/login` | public | Redirects to the OIDC authorization endpoint (sets `oidc_state`/`oidc_nonce` cookies) |
 | GET | `/api/auth/callback` | public | Code exchange, org resolution/provisioning, user upsert, session issuance; redirects to `/dashboard` |
 | GET | `/api/auth/logout` | public | Deletes the session, clears the cookie, RP-initiated logout when the provider supports it |
@@ -38,6 +39,16 @@ RLS scopes every list/read to the caller's organization automatically — none o
 ```json
 {"status": "ok"}
 ```
+
+### `GET /api/v1/config` → 200
+
+Public — no auth required. Returns feature flags the SPA needs before login.
+
+```json
+{"slack_oidc": true}
+```
+
+- `slack_oidc` — `true` when `OIDC_ISSUER_URL` is `https://slack.com`; controls whether the login page shows the "Sign in with Slack" branded button or a generic "Sign in" button.
 
 ### `GET /api/v1/me` → 200
 
