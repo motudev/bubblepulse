@@ -52,32 +52,35 @@ type tenantTxRunner interface {
 
 // Server holds the configured HTTP mux and its dependencies.
 type Server struct {
-	mux      *http.ServeMux
-	runner   tenantTxRunner
-	sessions SessionLookup
-	users    UserStore
-	teams    TeamStore
-	orgs     OrgStore
+	mux                 *http.ServeMux
+	runner              tenantTxRunner
+	sessions            SessionLookup
+	users               UserStore
+	teams               TeamStore
+	orgs                OrgStore
+	slackInstallEnabled bool
 }
 
 // Deps bundles the dependencies of the API server.
 type Deps struct {
-	Runner   tenantTxRunner
-	Sessions SessionLookup
-	Users    UserStore
-	Teams    TeamStore
-	Orgs     OrgStore
+	Runner              tenantTxRunner
+	Sessions            SessionLookup
+	Users               UserStore
+	Teams               TeamStore
+	Orgs                OrgStore
+	SlackInstallEnabled bool // true when SLACK_CLIENT_ID + SLACK_CLIENT_SECRET are configured
 }
 
 // New constructs a Server and registers all routes.
 func New(authHandler *auth.Handler, deps Deps, platforms []messaging.PlatformAdapter, dashH *dashboardHandler) *Server {
 	s := &Server{
-		mux:      http.NewServeMux(),
-		runner:   deps.Runner,
-		sessions: deps.Sessions,
-		users:    deps.Users,
-		teams:    deps.Teams,
-		orgs:     deps.Orgs,
+		mux:                 http.NewServeMux(),
+		runner:              deps.Runner,
+		sessions:            deps.Sessions,
+		users:               deps.Users,
+		teams:               deps.Teams,
+		orgs:                deps.Orgs,
+		slackInstallEnabled: deps.SlackInstallEnabled,
 	}
 	s.routes(authHandler, platforms, dashH)
 	return s

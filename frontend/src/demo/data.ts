@@ -9,6 +9,7 @@ export const DEMO_USER: User = {
   role: 'ADMIN',
   team_id: 'team-eng',
   org: { id: 'org-demo', name: 'Acme Corp' },
+  slack_install_enabled: false,
 }
 
 // ── Topics ───────────────────────────────────────────────────────────────────

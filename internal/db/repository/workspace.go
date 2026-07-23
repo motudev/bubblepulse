@@ -12,6 +12,10 @@ import (
 // (provider, external_id) pair.
 var ErrWorkspaceNotFound = errors.New("platform workspace not found")
 
+// ErrTokenNotSet is returned by FindBotToken when the workspace row exists but
+// bot_token is NULL (the app has not completed the OAuth install flow yet).
+var ErrTokenNotSet = errors.New("workspace bot token not set")
+
 // WorkspaceRepo handles persistence for platform_workspaces (Global Directory,
 // no RLS): the mapping of external workspace/tenant identifiers to organizations.
 type WorkspaceRepo struct {
@@ -33,6 +37,42 @@ func (r *WorkspaceRepo) FindOrgByWorkspace(ctx context.Context, provider, extern
 		return "", ErrWorkspaceNotFound
 	}
 	return orgID, err
+}
+
+// UpsertBotToken writes (or overwrites) the bot token and team name for an
+// existing workspace row. Called after a successful Slack OAuth exchange.
+func (r *WorkspaceRepo) UpsertBotToken(ctx context.Context, provider, externalID, teamName, botToken string) error {
+	const query = `
+		UPDATE platform_workspaces
+		SET bot_token = $3, team_name = $4
+		WHERE provider = $1 AND external_id = $2`
+	tag, err := r.pool.Exec(ctx, query, provider, externalID, botToken, teamName)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrWorkspaceNotFound
+	}
+	return nil
+}
+
+// FindBotToken returns the bot token for the given workspace.
+// Returns ErrWorkspaceNotFound if no row matches, or ErrTokenNotSet if the
+// row exists but bot_token is NULL (the OAuth install flow has not completed).
+func (r *WorkspaceRepo) FindBotToken(ctx context.Context, provider, externalID string) (string, error) {
+	const query = `SELECT bot_token FROM platform_workspaces WHERE provider = $1 AND external_id = $2`
+	var token *string
+	err := r.pool.QueryRow(ctx, query, provider, externalID).Scan(&token)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if token == nil {
+		return "", ErrTokenNotSet
+	}
+	return *token, nil
 }
 
 // ClaimWorkspace attempts to register orgID as the owner of the given external

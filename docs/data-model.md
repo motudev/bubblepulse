@@ -14,9 +14,9 @@ Tables marked **RLS** carry the `tenant_isolation_*` policy with `FORCE ROW LEVE
 | name | TEXT NOT NULL | `''` when not inferable at provisioning; admins set it later via `PATCH /api/v1/org` |
 | created_at | TIMESTAMPTZ NOT NULL | |
 
-## platform_workspaces — Global Directory (009)
+## platform_workspaces — Global Directory (009, bot token added in 016)
 
-Maps an external workspace/tenant identifier to exactly one organization.
+Maps an external workspace/tenant identifier to exactly one organization, and stores the workspace-scoped bot token obtained via the Slack OAuth install flow.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -24,9 +24,13 @@ Maps an external workspace/tenant identifier to exactly one organization.
 | org_id | UUID NOT NULL | `fk_platform_workspaces_org` → organizations, CASCADE |
 | provider | TEXT NOT NULL | OIDC issuer URL, e.g. `https://slack.com` |
 | external_id | TEXT NOT NULL | Slack `team_id`; future Teams/SAML tenant ID |
+| bot_token | TEXT NULL | Workspace-scoped Slack bot token (`xoxb-…`); written by `GET /api/slack/callback` after a successful OAuth exchange. NULL until the install flow completes. The Events API webhook functions without it; outbound Slack API calls require it. |
+| team_name | TEXT NULL | Slack workspace display name; written alongside `bot_token`. |
 | created_at | TIMESTAMPTZ NOT NULL | |
 
 Constraints: `uq_platform_workspaces_provider_external UNIQUE (provider, external_id)` — the anchor for the concurrent-provisioning race in `ClaimWorkspace`. Index: `idx_platform_workspaces_org`.
+
+**Token vs. signing secret:** `bot_token` is per-workspace (unique per install). The signing secret used to verify incoming webhook requests is per-app (same for all workspaces) and lives in `SLACK_SIGNING_SECRET` env var — it is never stored in the database.
 
 ## users — RLS (001, tenancy added in 011)
 

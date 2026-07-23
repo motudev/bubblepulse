@@ -142,16 +142,32 @@ func main() {
 		slackplatform.NewAdapter(cfg.SlackSigningSecret, msgSvc),
 	}
 
+	// Register the Slack OAuth install flow when client credentials are configured.
+	// In siloed mode this is optional; SLACK_BOT_TOKEN can be used as a fallback instead.
+	if cfg.SlackClientID != "" && cfg.SlackClientSecret != "" {
+		installer := slackplatform.NewInstaller(
+			cfg.SlackClientID,
+			cfg.SlackClientSecret,
+			cfg.SlackInstallRedirectURL,
+			cfg.FrontendURL,
+			pool,
+			orgRepo,
+			workspaceRepo,
+		)
+		platforms = append(platforms, installer.Adapters()...)
+	}
+
 	dashH := api.NewDashboardHandler(runner, dailyUpdateRepo)
 
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: api.New(authHandler, api.Deps{
-			Runner:   runner,
-			Sessions: sessionRepo,
-			Users:    userRepo,
-			Teams:    teamRepo,
-			Orgs:     orgRepo,
+			Runner:              runner,
+			Sessions:            sessionRepo,
+			Users:               userRepo,
+			Teams:               teamRepo,
+			Orgs:                orgRepo,
+			SlackInstallEnabled: cfg.SlackClientID != "" && cfg.SlackClientSecret != "",
 		}, platforms, dashH),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,

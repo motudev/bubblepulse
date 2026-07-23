@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BubbleMap from '@/components/BubbleMap.vue'
+import SlackInstallModal from '@/components/SlackInstallModal.vue'
 </script>
 
 <template>
@@ -7,6 +8,7 @@ import BubbleMap from '@/components/BubbleMap.vue'
     <div class="dashboard__canvas" aria-label="Team pulse canvas">
       <BubbleMap />
     </div>
+    <SlackInstallModal />
   </main>
 </template>
 

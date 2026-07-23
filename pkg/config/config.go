@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 )
 
@@ -17,18 +18,21 @@ const (
 
 // Config holds all runtime configuration for the application.
 type Config struct {
-	Port               string
-	TenancyMode        string // TenancyPooled (default) or TenancySiloed
-	DatabaseURL        string
-	OIDCIssuerURL      string
-	OIDCClientID       string
-	OIDCClientSecret   string
-	OIDCRedirectURL    string
-	FrontendURL        string // origin of the SPA; empty means same origin as the backend
-	SlackSigningSecret string
-	SlackBotToken      string
-	ONNXRuntimePath    string // path to libonnxruntime shared library; defaults to "libonnxruntime.so"
-	NLPServiceURL      string // base URL of the Python NLP sidecar; defaults to http://localhost:8090
+	Port                    string
+	TenancyMode             string // TenancyPooled (default) or TenancySiloed
+	DatabaseURL             string
+	OIDCIssuerURL           string
+	OIDCClientID            string
+	OIDCClientSecret        string
+	OIDCRedirectURL         string
+	FrontendURL             string // origin of the SPA; empty means same origin as the backend
+	SlackSigningSecret      string // per-app; verifies every Events API webhook
+	SlackBotToken           string // siloed-mode fallback; in pooled mode tokens come from platform_workspaces
+	SlackClientID           string // required to enable the OAuth install flow
+	SlackClientSecret       string // required to enable the OAuth install flow
+	SlackInstallRedirectURL string // redirect URI registered in the Slack app settings
+	ONNXRuntimePath         string // path to libonnxruntime shared library; defaults to "libonnxruntime.so"
+	NLPServiceURL           string // base URL of the Python NLP sidecar; defaults to http://localhost:8090
 }
 
 // Load reads environment variables and returns a validated Config.
@@ -43,9 +47,12 @@ func Load() (Config, error) {
 		OIDCClientSecret:   os.Getenv("OIDC_CLIENT_SECRET"),
 		OIDCRedirectURL:    os.Getenv("OIDC_REDIRECT_URL"),
 		FrontendURL:        os.Getenv("FRONTEND_URL"),
-		SlackSigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
-		SlackBotToken:      os.Getenv("SLACK_BOT_TOKEN"),
-		ONNXRuntimePath:    getEnvWithDefault("ONNX_RUNTIME_PATH", "libonnxruntime.so"),
+		SlackSigningSecret:      os.Getenv("SLACK_SIGNING_SECRET"),
+		SlackBotToken:           os.Getenv("SLACK_BOT_TOKEN"),
+		SlackClientID:           os.Getenv("SLACK_CLIENT_ID"),
+		SlackClientSecret:       os.Getenv("SLACK_CLIENT_SECRET"),
+		SlackInstallRedirectURL: os.Getenv("SLACK_INSTALL_REDIRECT_URL"),
+		ONNXRuntimePath:         getEnvWithDefault("ONNX_RUNTIME_PATH", "libonnxruntime.so"),
 		NLPServiceURL:      getEnvWithDefault("NLP_SERVICE_URL", "http://localhost:8090"),
 	}
 
@@ -65,9 +72,6 @@ func Load() (Config, error) {
 	if cfg.SlackSigningSecret == "" {
 		missing = append(missing, "SLACK_SIGNING_SECRET")
 	}
-	if cfg.SlackBotToken == "" {
-		missing = append(missing, "SLACK_BOT_TOKEN")
-	}
 
 	var problems []string
 	if len(missing) > 0 {
@@ -79,6 +83,10 @@ func Load() (Config, error) {
 
 	if len(problems) > 0 {
 		return Config{}, errors.New(join(problems))
+	}
+
+	if cfg.TenancyMode == TenancyPooled && (cfg.SlackClientID == "" || cfg.SlackClientSecret == "") {
+		slog.Warn("SLACK_CLIENT_ID or SLACK_CLIENT_SECRET not set: Slack OAuth install flow disabled; new workspaces cannot install the bot")
 	}
 
 	return cfg, nil

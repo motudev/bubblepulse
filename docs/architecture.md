@@ -69,6 +69,15 @@ Graceful shutdown on `SIGINT`/`SIGTERM`: River client stop and HTTP server shutd
 3. `MessageService.Handle` resolves the identity via the Global Directory (`user_identities`), resolves the org (identity's stored org, falling back to `platform_workspaces` by Slack `team_id`, backfilling the identity), then opens **one tenant-scoped transaction** that inserts the `daily_updates` row and enqueues the River job — atomically.
 4. `NLPWorker` picks up the job: reads the text (tenant-scoped read transaction), computes the 384-dim update embedding in-process, calls the sidecar's `POST /parse` for noun phrases, embeds each phrase, then writes embedding + topics in a tenant-scoped write transaction. Topic-extraction failure is non-fatal (embedding is still stored); a job with an empty `org_id` (legacy) is cancelled, not retried.
 
+## Slack OAuth install flow
+
+When `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` are set, two additional routes are registered:
+
+- `GET /api/slack/install` — generates a CSRF state token (stored as a short-lived `slack_install_state` HTTP-only cookie) and redirects to `https://slack.com/oauth/v2/authorize`.
+- `GET /api/slack/callback` — verifies the state, exchanges the code at `https://slack.com/api/oauth.v2.access`, provisions or joins the organization (same race-safe `ClaimWorkspace` path used during OIDC login), and stores the workspace's bot token in `platform_workspaces.bot_token`.
+
+**Signing secret vs. bot token:** The signing secret (`SLACK_SIGNING_SECRET`) is per-app — it is the same value for every workspace that installs the app and is legitimately kept in an env var. Bot tokens (`xoxb-…`) are per-workspace and are stored in the database after installation. In siloed (single-tenant) mode, `SLACK_BOT_TOKEN` can be set as a fallback for deployments that do not use the OAuth install flow.
+
 ## Configuration (`pkg/config/config.go`)
 
 | Env var | Default | Required | Purpose |
@@ -81,8 +90,11 @@ Graceful shutdown on `SIGINT`/`SIGTERM`: River client stop and HTTP server shutd
 | `OIDC_CLIENT_SECRET` | — | **yes** | OIDC client secret |
 | `OIDC_REDIRECT_URL` | — | **yes** | Callback URL registered with the provider |
 | `FRONTEND_URL` | `""` | no | SPA origin for post-login/logout redirects; empty = same origin |
-| `SLACK_SIGNING_SECRET` | — | **yes** | Verifies Slack Events API requests |
-| `SLACK_BOT_TOKEN` | — | **yes** | Validated at startup; not yet consumed by any code path (reserved for outbound Slack calls) |
+| `SLACK_SIGNING_SECRET` | — | **yes** | Verifies every Slack Events API request via HMAC-SHA256; per-app, shared across all workspace installs |
+| `SLACK_BOT_TOKEN` | — | no | Siloed-mode fallback bot token; has no effect in pooled mode (per-workspace tokens come from `platform_workspaces.bot_token`) |
+| `SLACK_CLIENT_ID` | — | no | Slack app client ID; required to enable `GET /api/slack/install` and `GET /api/slack/callback` |
+| `SLACK_CLIENT_SECRET` | — | no | Slack app client secret; required alongside `SLACK_CLIENT_ID` |
+| `SLACK_INSTALL_REDIRECT_URL` | — | no | Redirect URI registered in Slack app settings, pointing to `GET /api/slack/callback` |
 | `ONNX_RUNTIME_PATH` | `libonnxruntime.so` | no | Path to the ONNX runtime shared library |
 | `NLP_SERVICE_URL` | `http://localhost:8090` | no | Base URL of the spaCy sidecar |
 

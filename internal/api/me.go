@@ -17,12 +17,13 @@ type orgInfo struct {
 }
 
 type meResponse struct {
-	ID     int64    `json:"id"`
-	Email  string   `json:"email"`
-	Name   string   `json:"name"`
-	Role   string   `json:"role"`
-	TeamID *string  `json:"team_id"`
-	Org    *orgInfo `json:"org"`
+	ID                  int64    `json:"id"`
+	Email               string   `json:"email"`
+	Name                string   `json:"name"`
+	Role                string   `json:"role"`
+	TeamID              *string  `json:"team_id"`
+	Org                 *orgInfo `json:"org"`
+	SlackInstallEnabled bool     `json:"slack_install_enabled"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +45,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := meResponse{ID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, TeamID: u.TeamID}
+	resp := meResponse{ID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, TeamID: u.TeamID, SlackInstallEnabled: s.slackInstallEnabled}
 	if u.OrgID != nil {
 		org, err := s.orgs.FindOrgByID(r.Context(), *u.OrgID)
 		if err != nil {

@@ -12,6 +12,7 @@ export interface User {
   role: Role
   team_id: string | null
   org: OrgInfo | null
+  slack_install_enabled: boolean
 }
 
 export interface Team {

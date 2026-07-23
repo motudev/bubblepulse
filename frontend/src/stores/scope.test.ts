@@ -21,6 +21,7 @@ function makeUser(teamId: string | null): User {
     role: 'UPDATER',
     team_id: teamId,
     org: { id: 'org-1', name: 'Acme' },
+    slack_install_enabled: false,
   }
 }
 

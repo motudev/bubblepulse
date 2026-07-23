@@ -7,7 +7,8 @@ Auth levels:
 - **public** — no checks.
 - **session** — `requireSession`: valid session cookie; in pooled mode the session must carry an org (401 otherwise).
 - **ADMIN** / **ADMIN or TEAM_EDITOR** — `requireRole`: session + the user's role, re-read from the DB on every request (403 on mismatch).
-- **Slack signature** — HMAC-SHA256 over `v0:<timestamp>:<body>` compared constant-time against `X-Slack-Signature`.
+- **Slack signature** — HMAC-SHA256 over `v0:<timestamp>:<body>` compared constant-time against `X-Slack-Signature`. The signing secret is per-app (same for all workspace installs).
+- **Slack install state** — short-lived `slack_install_state` HTTP-only cookie compared against the `?state=` query parameter (CSRF guard for the OAuth install callback).
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -25,6 +26,8 @@ Auth levels:
 | PATCH | `/api/v1/users/{id}` | ADMIN or TEAM_EDITOR | Change a user's team and/or role |
 | PATCH | `/api/v1/org` | ADMIN | Rename the caller's organization |
 | POST | `/api/slack/events` | Slack signature | Slack Events API webhook |
+| GET | `/api/slack/install` | public | Redirects to the Slack OAuth v2 authorization URL (sets `slack_install_state` cookie); only registered when `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` are configured |
+| GET | `/api/slack/callback` | Slack install state | Exchanges the OAuth code for a per-workspace bot token, provisions the org if new, stores `bot_token` in `platform_workspaces`, redirects to the frontend |
 
 RLS scopes every list/read to the caller's organization automatically — none of the handlers filter by org in SQL. See [multi-tenancy.md](multi-tenancy.md).
 
@@ -45,11 +48,12 @@ RLS scopes every list/read to the caller's organization automatically — none o
   "name": "Alice",
   "role": "ADMIN",
   "team_id": "b7c9…-uuid-or-null",
-  "org": {"id": "a1b2…-uuid", "name": "Acme"}
+  "org": {"id": "a1b2…-uuid", "name": "Acme"},
+  "slack_install_enabled": true
 }
 ```
 
-`org` is `null` only for legacy users without an organization (siloed mode).
+`org` is `null` only for legacy users without an organization (siloed mode). `slack_install_enabled` is `true` when `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` are configured on the backend — the frontend uses this to decide whether to show the "Add to Slack" install modal.
 
 ### `GET /api/dashboard[?team_id=<uuid>]` → 200
 
@@ -117,6 +121,17 @@ Responses:
 ### `POST /api/slack/events`
 
 - 401 on signature failure. `url_verification` envelopes are answered with the plaintext challenge. `event_callback` is acked with 200 **before** processing (Slack retries non-2xx); only DM messages (`channel_type == "im"`) from non-bot users with text are ingested. Unknown senders / unmapped workspaces are logged and dropped.
+
+### `GET /api/slack/install`
+
+Only registered when `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` are present. Sets a `slack_install_state` cookie (HttpOnly, SameSite=Lax, 10-minute TTL, path scoped to `/api/slack/callback`) then redirects to `https://slack.com/oauth/v2/authorize` with `client_id`, `scope`, `redirect_uri`, and `state`.
+
+### `GET /api/slack/callback`
+
+- 400 on missing or mismatched `state` vs. the `slack_install_state` cookie, or missing `code`.
+- 502 if the `oauth.v2.access` call to Slack fails or returns `ok: false`.
+- 500 on database errors (org provisioning or token storage).
+- On success: provisions or joins the org (race-safe — concurrent installs from the same workspace converge to one org), stores the workspace bot token in `platform_workspaces`, and redirects to `/dashboard?slack_installed=1`.
 
 ## Error format
 
